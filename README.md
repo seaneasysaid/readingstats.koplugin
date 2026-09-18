@@ -16,6 +16,9 @@
 - 菜单里显示的名字：**阅读足迹**（在内置「阅读统计」下面）
 - 目录 / 内部名：`readingstats.koplugin`
 
+[![Release](https://img.shields.io/github/v/release/seaneasysaid/lightweight-reading-stats)](https://github.com/seaneasysaid/lightweight-reading-stats/releases/latest)
+[![下载](https://img.shields.io/github/downloads/seaneasysaid/lightweight-reading-stats/total)](https://github.com/seaneasysaid/lightweight-reading-stats/releases/latest)
+
 ---
 
 ## 功能
@@ -140,8 +143,12 @@
 
 ## 安装
 
-1. 下载仓库里的 `readingstats.koplugin/` 整个目录（5 个 `.lua` 文件）。
-2. 拷进设备的 KOReader 插件目录：
+**方式一：下载 Release 压缩包（推荐）**
+
+1. 到 [Releases](https://github.com/seaneasysaid/lightweight-reading-stats/releases/latest)
+   下载 `readingstats.koplugin.zip`（或点上面的徽章）。
+2. 解压得到 `readingstats.koplugin/` 目录（zip 里已带这层目录，直接解压即可）。
+3. 把整个目录拷进设备的 KOReader 插件目录：
 
    | 设备 | 路径 |
    | --- | --- |
@@ -149,8 +156,12 @@
    | Kobo | `<USB 盘符>/.adds/koreader/plugins/` |
    | Android | `/sdcard/koreader/plugins/` |
 
-3. **彻底重启 KOReader**（退出再进，不是回书架）。
-4. 顶部菜单 → ☰ → **阅读足迹**。
+4. **彻底重启 KOReader**（退出再进，不是回书架）。
+5. 顶部菜单 → ☰ → **阅读足迹**。
+
+**方式二：直接取源码**
+
+1. 下载仓库里的 `readingstats.koplugin/` 整个目录（5 个 `.lua` 文件），后续步骤同上。
 
 卸载：直接删掉 `readingstats.koplugin/` 目录并重启。
 
