@@ -1,0 +1,4 @@
+# Lua 源码强制 LF：KOReader 跑在 Linux 系内核上，避免 CRLF 带来的意外
+*.lua text eol=lf
+*.md  text eol=lf
+*.png binary
