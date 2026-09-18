@@ -1,12 +1,20 @@
-# 阅读足迹 · readingstats.koplugin
+# 轻量版阅读统计 · 阅读足迹（readingstats.koplugin）
 
 > KOReader 插件 —— 把阅读记录变成一张看得见的图。
 > 菜单进入，无需手势；日历热力图 + GitHub 风格全年贡献图 + 阅读分析，三视图并存。
+
+**「轻量版」是什么意思**：相对 KOReader 内置的 **「阅读统计」** 插件，本插件只做
+「看图」这一件事 —— 不接管阅读器统计逻辑、不改阅读界面、不加手势、不常驻后台。
+它只是在菜单里多一个入口，点开就读 `statistics.sqlite3` 画三张图，关掉即退出。
 
 由三份 KOReader user patch（① 日历阅读统计 ② 阅读小票 ③ 阅读分析）改造而来，
 现保留 **① 日历阅读统计** 与 **③ 阅读分析**，并新增移植自
 [inkstain.koplugin](https://github.com/Estela-Zelin84/inkstain.koplugin) 的
 **GitHub 风格阅读热力图**。
+
+- 项目名：**轻量版阅读统计 · 阅读足迹**
+- 菜单里显示的名字：**阅读足迹**（在内置「阅读统计」下面）
+- 目录 / 内部名：`readingstats.koplugin`
 
 ---
 
