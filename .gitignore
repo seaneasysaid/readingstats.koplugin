@@ -1,0 +1,17 @@
+# KOReader 运行期产物
+crash.log
+*.sqlite3
+*.sqlite3-journal
+settings/*.lua.bak
+
+# 编辑器 / 系统
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+
+# Python 生成脚本缓存
+__pycache__/
+*.pyc
