@@ -16,8 +16,8 @@
 - 菜单里显示的名字：**阅读足迹**（在内置「阅读统计」下面）
 - 目录 / 内部名：`readingstats.koplugin`
 
-[![Release](https://img.shields.io/github/v/release/seaneasysaid/lightweight-reading-stats)](https://github.com/seaneasysaid/lightweight-reading-stats/releases/latest)
-[![下载](https://img.shields.io/github/downloads/seaneasysaid/lightweight-reading-stats/total)](https://github.com/seaneasysaid/lightweight-reading-stats/releases/latest)
+[![Release](https://img.shields.io/github/v/release/seaneasysaid/readingstats.koplugin)](https://github.com/seaneasysaid/readingstats.koplugin/releases/latest)
+[![下载](https://img.shields.io/github/downloads/seaneasysaid/readingstats.koplugin/total)](https://github.com/seaneasysaid/readingstats.koplugin/releases/latest)
 
 ---
 
@@ -145,7 +145,7 @@
 
 **方式一：下载 Release 压缩包（推荐）**
 
-1. 到 [Releases](https://github.com/seaneasysaid/lightweight-reading-stats/releases/latest)
+1. 到 [Releases](https://github.com/seaneasysaid/readingstats.koplugin/releases/latest)
    下载 `readingstats.koplugin.zip`（或点上面的徽章）。
 2. 解压得到 `readingstats.koplugin/` 目录（zip 里已带这层目录，直接解压即可）。
 3. 把整个目录拷进设备的 KOReader 插件目录：
