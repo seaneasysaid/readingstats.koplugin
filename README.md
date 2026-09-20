@@ -204,3 +204,14 @@ readingstats.koplugin/
 ## 许可
 
 MIT
+
+---
+
+## 项目推荐
+
+| 插件 | 简介 |
+| --- | --- |
+| [legadocomic.koplugin](https://github.com/seaneasysaid/legadocomic.koplugin) | KOReader 上直接看漫画 —— 对接「开源阅读」(Legado) 的 Web 服务在线流式加载，不必先下载整本。 |
+| [leko-reader-fixed](https://github.com/seaneasysaid/leko-reader-fixed) | 全程本地运行的网络小说插件 —— 支持 Legado 兼容书源，在线阅读轻快流畅、正文无广告。 |
+| [fanqie.koplugin-fixed](https://github.com/seaneasysaid/fanqie.koplugin-fixed) | 番茄小说非官方增强版 —— 适配书山聚合 + 知秋段评，正文无广告，节点测速自动切换。 |
+| [koreader-remote](https://github.com/seaneasysaid/koreader-remote) | 手机 / 电脑浏览器无线遥控 KOReader —— 局域网内翻页、搜索、传书，全程不必碰设备。 |
