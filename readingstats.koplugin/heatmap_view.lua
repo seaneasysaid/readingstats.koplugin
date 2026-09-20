@@ -558,7 +558,7 @@ function HeatmapWindow:_build()
     legend[#legend + 1] = TextWidget:new { text = _("多"), face = face_tiny, fgcolor = BLACK }
 
     -- ---- 汇总 ----
-    local summary_str = string.format(_("有阅读 %d 天 · 合计 %s · 单日最长 %s"),
+    local summary_str = string.format(_("阅读 %d 天 · 合计 %s · 单日最长 %s"),
         active_days, fmtDuration(total_secs), fmtDuration(max_day))
 
     local content = VerticalGroup:new {
