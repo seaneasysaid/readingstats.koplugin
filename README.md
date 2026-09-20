@@ -1,5 +1,8 @@
 # 轻量版阅读统计 · 阅读足迹（readingstats.koplugin）
 
+[![Release](https://img.shields.io/github/v/release/seaneasysaid/readingstats.koplugin)](https://github.com/seaneasysaid/readingstats.koplugin/releases/latest)
+[![下载](https://img.shields.io/github/downloads/seaneasysaid/readingstats.koplugin/total)](https://github.com/seaneasysaid/readingstats.koplugin/releases/latest)
+
 > KOReader 插件 —— 把阅读记录变成一张看得见的图。
 > 菜单进入，无需手势；日历热力图 + GitHub 风格全年贡献图 + 阅读分析，三视图并存。
 
@@ -14,9 +17,6 @@
 - 项目名：**轻量版阅读统计 · 阅读足迹**
 - 菜单里显示的名字：**阅读足迹**（在内置「阅读统计」下面）
 - 目录 / 内部名：`readingstats.koplugin`
-
-[![Release](https://img.shields.io/github/v/release/seaneasysaid/readingstats.koplugin)](https://github.com/seaneasysaid/readingstats.koplugin/releases/latest)
-[![下载](https://img.shields.io/github/downloads/seaneasysaid/readingstats.koplugin/total)](https://github.com/seaneasysaid/readingstats.koplugin/releases/latest)
 
 ---
 
