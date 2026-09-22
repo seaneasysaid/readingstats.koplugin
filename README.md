@@ -36,7 +36,7 @@
 
 顶部菜单 → ☰ 工具 → **阅读足迹**（就在内置「阅读统计」下面）。
 
-<img src="docs/screenshots/01-menu.png" alt="菜单" width="520" />
+<img src="docs/screenshots/01-menu.png" alt="菜单" width="580" />
 
 层级：`☰ 工具` → `阅读足迹` → `阅读报告 / 日历阅读统计 / 阅读热力图 / 阅读分析 / 设置`
 
@@ -46,37 +46,37 @@
 
 顶部标题居中（如 `本月·2026年09月`），下面一排 **周 / 月 / 年 / 总** 周期切换条；主体为四张卡片：**概览 / 阅读时长趋势 / 读书排行 / 阅读偏好**；底部为 `上一周期 / 下一周期`。
 
-<img src="docs/screenshots/09-report-month.png" alt="阅读报告 · 本月" width="320" />
+<img src="docs/screenshots/09-report-month.png" alt="阅读报告 · 本月" width="360" />
 
 ### ② 日历阅读统计
 
-<img src="docs/screenshots/02-calendar.png" alt="日历阅读统计" width="320" />
+<img src="docs/screenshots/02-calendar.png" alt="日历阅读统计" width="360" />
 
 ### ③ 阅读热力图 · 26 周（单行铺满）
 
-<img src="docs/screenshots/03-heatmap-26w.png" alt="阅读热力图 26 周" width="520" />
+<img src="docs/screenshots/03-heatmap-26w.png" alt="阅读热力图 26 周" width="580" />
 
 ### ③ 阅读热力图 · 52 周（拆成两行，每行 26 周）
 
-<img src="docs/screenshots/04-heatmap-52w.png" alt="阅读热力图 52 周" width="460" />
+<img src="docs/screenshots/04-heatmap-52w.png" alt="阅读热力图 52 周" width="500" />
 
 ### ④ 阅读分析
 
 红框 = 可点击的地方，编号对应下方图例。
 
-<img src="docs/screenshots/05-insights.png" alt="阅读分析" width="460" />
+<img src="docs/screenshots/05-insights.png" alt="阅读分析" width="500" />
 
 ### ④-1 年度书籍排行（点「books read」进入）
 
-<img src="docs/screenshots/07-booklist-year.png" alt="年度书籍排行" width="320" />
+<img src="docs/screenshots/07-booklist-year.png" alt="年度书籍排行" width="360" />
 
 ### ④-2 月度书籍排行（点某根月份柱进入）
 
-<img src="docs/screenshots/08-booklist-month.png" alt="月度书籍排行" width="320" />
+<img src="docs/screenshots/08-booklist-month.png" alt="月度书籍排行" width="360" />
 
 ### 设置
 
-<img src="docs/screenshots/06-settings.png" alt="设置" width="460" />
+<img src="docs/screenshots/06-settings.png" alt="设置" width="500" />
 
 ---
 
