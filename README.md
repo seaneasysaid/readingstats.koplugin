@@ -10,9 +10,7 @@
 「看图」这一件事 —— 不接管阅读器统计逻辑、不改阅读界面、不加手势、不常驻后台。
 它只是在菜单里多一个入口，点开就读 `statistics.sqlite3` 画三张图，关掉即退出。
 
-由三份 KOReader user patch（① 日历阅读统计 ② 阅读小票 ③ 阅读分析）改造而来，
-现保留 **① 日历阅读统计** 与 **③ 阅读分析**，并新增
-**GitHub 风格阅读热力图**。
+
 
 - 项目名：**轻量版阅读统计 · 阅读足迹**
 - 菜单里显示的名字：**阅读足迹**（在内置「阅读统计」下面）
@@ -212,6 +210,6 @@ MIT
 | 插件 | 简介 |
 | --- | --- |
 | [legadocomic.koplugin](https://github.com/seaneasysaid/legadocomic.koplugin) | KOReader 上直接看漫画 —— 对接「开源阅读」(Legado) 的 Web 服务在线流式加载，不必先下载整本。 |
-| [leko-reader-fixed](https://github.com/seaneasysaid/leko-reader-fixed) | 全程本地运行的网络小说插件 —— 支持 Legado 兼容书源，在线阅读轻快流畅、正文无广告。 |
-| [fanqie.koplugin-fixed](https://github.com/seaneasysaid/fanqie.koplugin-fixed) | 番茄小说非官方增强版 —— 适配书山聚合 + 知秋段评，正文无广告，节点测速自动切换。 |
+| [leko-reader-fixed](https://github.com/seaneasysaid/leko-reader-fixed) | 全程本地运行的网络小说插件 —— 支持 Legado 兼容书源，在线阅读轻快流畅。（非官方增强版 Fork，基于上游 0.16.0 的本地定制。） |
+| [fanqie.koplugin-fixed](https://github.com/seaneasysaid/fanqie.koplugin-fixed) | 番茄小说非官方增强版 —— 适配书山聚合 + 知秋段评，正文无广告，节点测速自动切换。（非官方增强版 Fork，基于上游v2.2.0 的本地定制。） |
 | [koreader-remote](https://github.com/seaneasysaid/koreader-remote) | 手机 / 电脑浏览器无线遥控 KOReader —— 局域网内翻页、搜索、传书，全程不必碰设备。 |
