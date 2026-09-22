@@ -8,6 +8,7 @@ local logger          = require("logger")
 local CalendarStats   = require("calendar_stats")
 local HeatmapView     = require("heatmap_view")
 local ReadingInsights = require("reading_insights")
+local ReadingStatsView = require("reading_stats_view")
 
 local MENU_KEY = "reading_stats"
 
@@ -131,6 +132,12 @@ function ReadingStats:addToMainMenu(menu_items)
     menu_items[MENU_KEY] = {
         text = _("阅读足迹"),
         sub_item_table = {
+            {
+                text = _("阅读报告"),
+                callback = withStatsFlush(function()
+                    safeCall("阅读报告", function() ReadingStatsView.show(self.ui, "month", nil) end)
+                end),
+            },
             {
                 text = _("日历阅读统计"),
                 callback = withStatsFlush(function()
