@@ -584,7 +584,9 @@ local function buildYearHeader(popup_self, font_section, layout, yearRange)
     local nav_width = sample_nav:getSize().w + icon_width
     sample_nav:free()
 
-    local year_button_tap_dialog
+    -- ⚠️ 两个 dialog 必须在这里一起声明（下面 hold_buttons / tap_buttons 的闭包要引用它们）。
+    -- 少声明一个就会变成全局变量，多实例时会「关错对话框」。
+    local year_button_tap_dialog, year_button_hold_dialog
     local tap_buttons = {}
     local yearCount = popup_self.yearRange.max_year - popup_self.yearRange.min_year
     if yearCount >= 1 then

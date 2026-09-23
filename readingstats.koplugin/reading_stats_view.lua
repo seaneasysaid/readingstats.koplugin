@@ -50,8 +50,15 @@ local MIN_MONTH_DAYS = 15 -- 月视图横轴最少保留的天数刻度
 -- 配合「一次 init 只开一次库」，避免每次切 tab 都反复 open/close sqlite（e-ink 上很贵）。
 local function openStatsDb()
     local lfs = require("libs/libkoreader-lfs")
-    if lfs.attributes(db_path, "mode") ~= "file" then return nil end
-    return SQ3.open(db_path)
+    if lfs.attributes(db_path, "mode") ~= "file" then
+        logger.warn("READING_STATS_VIEW: statistics.sqlite3 不存在: " .. db_path)
+        return nil
+    end
+    local conn = SQ3.open(db_path)
+    if not conn then
+        logger.err("READING_STATS_VIEW: 打开统计库失败: " .. db_path)
+    end
+    return conn
 end
 
 -- 视图数据缓存：key = "mode:base_time"。短时间内重进同一周期直接命中，免去再查库。
@@ -65,12 +72,18 @@ local function cacheStore(key, entry)
     _view_cache[key] = entry
 end
 
+-- 执行一条查询；出错时记日志（不然各卡片会静默显示 0，设备上没法排查）。
 local function withStatement(conn, sql, fn)
     local stmt = conn:prepare(sql)
-    if not stmt then return end
+    if not stmt then
+        logger.err("READING_STATS_VIEW: SQL prepare 失败: " .. tostring(sql))
+        return
+    end
     local ok, result = pcall(fn, stmt)
     stmt:close()
     if ok then return result end
+    logger.err("READING_STATS_VIEW: SQL 执行失败: " .. tostring(result)
+        .. " | " .. tostring(sql))
 end
 
 -- ===================== 周期边界 =====================
@@ -169,20 +182,35 @@ local function fetchSummary(conn, b)
     return s
 end
 
+-- 「读完」判据门槛（配合下面 fetchExtras 的注释看）
+local FINISH_MIN_PAGES = 50   -- 总页数下限：过滤掉「章节被当成一本书」的碎记录
+local FINISH_MIN_RATIO = 0.99 -- 进度下限：留一点余量应对页码标定误差
+local FINISH_MAX_RATIO = 1.05 -- 进度上限：挡掉 total_pages 是哨兵值导致的几百倍假进度
+
 -- 读完本数 / 笔记条数。book 表列名在不同 KOReader 版本上略有差异，
 -- 查不到就保持 0，不影响其它统计。
 local function fetchExtras(conn, b)
     local e = { finished = 0, notes = 0 }
     if not conn then return e end
     local where    = string.format("start_time >= %d AND start_time < %d", b.start_ts, b.end_ts)
-    local where_ps = string.format("ps.start_time >= %d AND ps.start_time < %d", b.start_ts, b.end_ts)
-    -- 读完：周期内读到过的最大页码 >= 该书总页数
+    local where_d  = string.format("d.start_time >= %d AND d.start_time < %d", b.start_ts, b.end_ts)
+    -- 读完：用 page_stat_data 的「当次阅读进度」（同一行里 page 与 total_pages 天然同尺度），
+    -- 只取 total_pages >= FINISH_MIN_PAGES 的行来算进度，要求进度落在 [99%, 105%]。
+    --
+    -- ⚠️ 不要改回「MAX(page_stat.page) >= book.pages」：
+    --   · 中文网文/漫画库里 book.pages 常只有 6~20（一个章节就是一条 book 记录），
+    --     于是「7 页的小文件翻到第 7 页」也被算成读完；
+    --   · 换排版/字号后 page 会被重标定，与 book.pages 不再是同一尺度；
+    --   · 漫画的 total_pages 会出现 10000 这类哨兵值，page/total_pages 能算出几百倍进度。
+    --   实测某月 734 条书目记录里有 599 条被误判「读完」（82%）；换成下面的判据后是 3 条。
     withStatement(conn,
         "SELECT COUNT(*) FROM ("
-        .. "SELECT ps.id_book AS bid, MAX(ps.page) AS mp, b.pages AS pages "
-        .. "FROM page_stat ps LEFT JOIN book b ON ps.id_book = b.id "
-        .. "WHERE " .. where_ps .. " GROUP BY ps.id_book) "
-        .. "WHERE pages > 0 AND mp >= pages",
+        .. "SELECT d.id_book AS bid, "
+        .. "MAX(CAST(d.page AS REAL) / d.total_pages) AS prog "
+        .. "FROM page_stat_data d WHERE " .. where_d
+        .. " AND d.total_pages >= " .. FINISH_MIN_PAGES .. " "
+        .. "GROUP BY d.id_book) "
+        .. string.format("WHERE prog >= %.2f AND prog <= %.2f", FINISH_MIN_RATIO, FINISH_MAX_RATIO),
         function(stmt)
             for row in stmt:rows() do
                 e.finished = tonumber(row[1]) or 0

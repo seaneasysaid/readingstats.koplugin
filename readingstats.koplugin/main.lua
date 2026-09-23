@@ -158,11 +158,15 @@ function ReadingStats:addToMainMenu(menu_items)
             },
             {
                 text = _("设置"),
-                sub_item_table = {
-                    CalendarStats.settings_menu,  -- 日历统计项选择 + 字号
-                    HeatmapView.settings_menu,    -- 热力图跨度 26 / 52 周
-                    rows_setting,
-                },
+                -- 只放真实存在的项：任一子模块的 settings_menu 缺失时，直接塞 nil 会让
+                -- 数组在 nil 处截断，后面的项整段消失。
+                sub_item_table = (function()
+                    local items = {}
+                    if cal_settings then items[#items + 1] = cal_settings end
+                    if HeatmapView.settings_menu then items[#items + 1] = HeatmapView.settings_menu end
+                    items[#items + 1] = rows_setting
+                    return items
+                end)(),
             },
         },
     }
