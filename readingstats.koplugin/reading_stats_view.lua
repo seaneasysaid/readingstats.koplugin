@@ -43,20 +43,26 @@ local TABS = {
 local MODE_TITLE = { week = "本周", month = "本月", year = "本年", total = "累计" }
 local CAPTION    = { week = "本周阅读", month = "本月阅读", year = "本年阅读", total = "累计阅读" }
 local WEEKDAY_LABELS = { "一", "二", "三", "四", "五", "六", "日" } -- 周一..周日
+local MIN_MONTH_DAYS = 15 -- 月视图横轴最少保留的天数刻度
 
 -- ===================== 数据库访问 =====================
-local function withStatsDb(fallback, fn)
+-- 打开统计库连接（库不存在/打开失败返回 nil）。
+-- 配合「一次 init 只开一次库」，避免每次切 tab 都反复 open/close sqlite（e-ink 上很贵）。
+local function openStatsDb()
     local lfs = require("libs/libkoreader-lfs")
-    if lfs.attributes(db_path, "mode") ~= "file" then
-        return fallback
-    end
-    local conn = SQ3.open(db_path)
-    if not conn then return fallback end
-    local ok, result = pcall(fn, conn)
-    conn:close()
-    if ok then return result end
-    logger.err("READING_STATS_VIEW: db error: " .. tostring(result))
-    return fallback
+    if lfs.attributes(db_path, "mode") ~= "file" then return nil end
+    return SQ3.open(db_path)
+end
+
+-- 视图数据缓存：key = "mode:base_time"。短时间内重进同一周期直接命中，免去再查库。
+local _view_cache     = {}
+local _VIEW_CACHE_TTL = 60 -- 秒
+
+local function cacheStore(key, entry)
+    local n = 0
+    for _ in pairs(_view_cache) do n = n + 1 end
+    if n >= 48 then _view_cache = {} end -- 简单上限，防止翻页产生大量键
+    _view_cache[key] = entry
 end
 
 local function withStatement(conn, sql, fn)
@@ -137,67 +143,65 @@ local function getPeriodBounds(period, base_time)
 end
 
 -- ===================== 数据查询 =====================
-local function fetchSummary(b)
+local function fetchSummary(conn, b)
     local s = { duration = 0, days = 0, books = 0, max_day = 0 }
-    return withStatsDb(s, function(conn)
-        local where = string.format("start_time >= %d AND start_time < %d", b.start_ts, b.end_ts)
-        withStatement(conn,
-            "SELECT COALESCE(SUM(duration),0), "
-            .. "COUNT(DISTINCT date(start_time,'unixepoch','localtime')), "
-            .. "COUNT(DISTINCT id_book) FROM page_stat WHERE " .. where,
-            function(stmt)
-                for row in stmt:rows() do
-                    s.duration = tonumber(row[1]) or 0
-                    s.days     = tonumber(row[2]) or 0
-                    s.books    = tonumber(row[3]) or 0
-                end
-            end)
-        withStatement(conn,
-            "SELECT COALESCE(MAX(d),0) FROM (SELECT SUM(duration) AS d FROM page_stat WHERE "
-            .. where .. " GROUP BY date(start_time,'unixepoch','localtime'))",
-            function(stmt)
-                for row in stmt:rows() do
-                    s.max_day = tonumber(row[1]) or 0
-                end
-            end)
-        return s
-    end)
+    if not conn then return s end
+    local where = string.format("start_time >= %d AND start_time < %d", b.start_ts, b.end_ts)
+    withStatement(conn,
+        "SELECT COALESCE(SUM(duration),0), "
+        .. "COUNT(DISTINCT date(start_time,'unixepoch','localtime')), "
+        .. "COUNT(DISTINCT id_book) FROM page_stat WHERE " .. where,
+        function(stmt)
+            for row in stmt:rows() do
+                s.duration = tonumber(row[1]) or 0
+                s.days     = tonumber(row[2]) or 0
+                s.books    = tonumber(row[3]) or 0
+            end
+        end)
+    withStatement(conn,
+        "SELECT COALESCE(MAX(d),0) FROM (SELECT SUM(duration) AS d FROM page_stat WHERE "
+        .. where .. " GROUP BY date(start_time,'unixepoch','localtime'))",
+        function(stmt)
+            for row in stmt:rows() do
+                s.max_day = tonumber(row[1]) or 0
+            end
+        end)
+    return s
 end
 
 -- 读完本数 / 笔记条数。book 表列名在不同 KOReader 版本上略有差异，
 -- 查不到就保持 0，不影响其它统计。
-local function fetchExtras(b)
+local function fetchExtras(conn, b)
     local e = { finished = 0, notes = 0 }
+    if not conn then return e end
     local where    = string.format("start_time >= %d AND start_time < %d", b.start_ts, b.end_ts)
     local where_ps = string.format("ps.start_time >= %d AND ps.start_time < %d", b.start_ts, b.end_ts)
-    return withStatsDb(e, function(conn)
-        -- 读完：周期内读到过的最大页码 >= 该书总页数
-        withStatement(conn,
-            "SELECT COUNT(*) FROM ("
-            .. "SELECT ps.id_book AS bid, MAX(ps.page) AS mp, b.pages AS pages "
-            .. "FROM page_stat ps LEFT JOIN book b ON ps.id_book = b.id "
-            .. "WHERE " .. where_ps .. " GROUP BY ps.id_book) "
-            .. "WHERE pages > 0 AND mp >= pages",
-            function(stmt)
-                for row in stmt:rows() do
-                    e.finished = tonumber(row[1]) or 0
-                end
-            end)
-        -- 笔记：周期内读过的书累计笔记数
-        withStatement(conn,
-            "SELECT COALESCE(SUM(notes),0) FROM book WHERE id IN ("
-            .. "SELECT DISTINCT id_book FROM page_stat WHERE " .. where .. ")",
-            function(stmt)
-                for row in stmt:rows() do
-                    e.notes = tonumber(row[1]) or 0
-                end
-            end)
-        return e
-    end)
+    -- 读完：周期内读到过的最大页码 >= 该书总页数
+    withStatement(conn,
+        "SELECT COUNT(*) FROM ("
+        .. "SELECT ps.id_book AS bid, MAX(ps.page) AS mp, b.pages AS pages "
+        .. "FROM page_stat ps LEFT JOIN book b ON ps.id_book = b.id "
+        .. "WHERE " .. where_ps .. " GROUP BY ps.id_book) "
+        .. "WHERE pages > 0 AND mp >= pages",
+        function(stmt)
+            for row in stmt:rows() do
+                e.finished = tonumber(row[1]) or 0
+            end
+        end)
+    -- 笔记：周期内读过的书累计笔记数
+    withStatement(conn,
+        "SELECT COALESCE(SUM(notes),0) FROM book WHERE id IN ("
+        .. "SELECT DISTINCT id_book FROM page_stat WHERE " .. where .. ")",
+        function(stmt)
+            for row in stmt:rows() do
+                e.notes = tonumber(row[1]) or 0
+            end
+        end)
+    return e
 end
 
 -- 柱图数据：{ {label, ts_start, ts_end, value} ... }，value 单位秒
-local function fetchBuckets(period, b)
+local function fetchBuckets(conn, period, b)
     local units = {}
     if period == "week" then
         for i = 0, 6 do
@@ -234,7 +238,7 @@ local function fetchBuckets(period, b)
         end
     end
 
-    withStatsDb(nil, function(conn)
+    if conn then
         if period == "total" then
             withStatement(conn,
                 "SELECT strftime('%Y',start_time,'unixepoch','localtime') y, "
@@ -262,72 +266,75 @@ local function fetchBuckets(period, b)
                     end
                 end)
         end
-    end)
+    end
 
-    -- 月视图天数太多，只保留有阅读的日子；周 / 年 / 总 保留完整刻度（没阅读的就没有柱子）
+    -- 月视图：横轴天数 = max(15, 当月有阅读的最后一天)，上限为当月实际天数。
+    -- 即「少于 15 天也保持 15 天刻度，多于 15 天就按实际天数」；没阅读的日子留白。
     if period == "month" then
-        local active = {}
-        for _, u in ipairs(units) do
-            if u.value > 0 then table.insert(active, u) end
+        local last_active = 0
+        for i, u in ipairs(units) do
+            if u.value > 0 then last_active = i end
         end
-        return active
+        local n = math.max(MIN_MONTH_DAYS, last_active)
+        if n > #units then n = #units end
+        local out = {}
+        for i = 1, n do out[i] = units[i] end
+        return out
     end
     return units
 end
 
 -- 阅读时段偏好：按 start_time 的小时归入 4 个时段
-local function fetchPreference(b)
+local function fetchPreference(conn, b)
     local buckets = {
         { name = "凌晨 0-6 点", dur = 0 },
         { name = "上午 6-12 点", dur = 0 },
         { name = "下午 12-18 点", dur = 0 },
         { name = "晚上 18-24 点", dur = 0 },
     }
-    withStatsDb(nil, function(conn)
-        withStatement(conn,
-            "SELECT strftime('%H',start_time,'unixepoch','localtime') h, "
-            .. "COALESCE(SUM(duration),0) FROM page_stat "
-            .. "WHERE start_time >= " .. b.start_ts .. " AND start_time < " .. b.end_ts
-            .. " GROUP BY h",
-            function(stmt)
-                for row in stmt:rows() do
-                    local hh = tonumber(row[1]) or 0
-                    local v  = tonumber(row[2]) or 0
-                    local idx = (hh < 6) and 1 or (hh < 12) and 2 or (hh < 18) and 3 or 4
-                    buckets[idx].dur = buckets[idx].dur + v
-                end
-            end)
-    end)
+    if not conn then return buckets end
+    withStatement(conn,
+        "SELECT strftime('%H',start_time,'unixepoch','localtime') h, "
+        .. "COALESCE(SUM(duration),0) FROM page_stat "
+        .. "WHERE start_time >= " .. b.start_ts .. " AND start_time < " .. b.end_ts
+        .. " GROUP BY h",
+        function(stmt)
+            for row in stmt:rows() do
+                local hh = tonumber(row[1]) or 0
+                local v  = tonumber(row[2]) or 0
+                local idx = (hh < 6) and 1 or (hh < 12) and 2 or (hh < 18) and 3 or 4
+                buckets[idx].dur = buckets[idx].dur + v
+            end
+        end)
     return buckets
 end
 
-local function fetchTopBooks(b)
+local function fetchTopBooks(conn, b)
     local books = {}
-    return withStatsDb(books, function(conn)
-        local where = string.format(
-            "page_stat.start_time >= %d AND page_stat.start_time < %d", b.start_ts, b.end_ts)
-        withStatement(conn, [[
-            SELECT book.title,
-                   COALESCE(SUM(page_stat.duration),0) AS duration_seconds
-            FROM page_stat
-            JOIN book ON page_stat.id_book = book.id
-            WHERE ]] .. where .. [[
-            GROUP BY page_stat.id_book
-            HAVING duration_seconds > 0
-            ORDER BY duration_seconds DESC
-            LIMIT 10
-        ]], function(stmt)
-            for row in stmt:rows() do
-                local title = row[1] or ""
-                if title == "" or title == "N/A" then title = "未知书名" end
-                table.insert(books, {
-                    title    = title,
-                    duration = tonumber(row[2]) or 0,
-                })
-            end
-        end)
-        return books
+    if not conn then return books end
+    local where = string.format(
+        "page_stat.start_time >= %d AND page_stat.start_time < %d", b.start_ts, b.end_ts)
+    withStatement(conn, [[
+        SELECT book.title,
+               COALESCE(SUM(page_stat.duration),0) AS duration_seconds
+        FROM page_stat
+        JOIN book ON page_stat.id_book = book.id
+        WHERE ]] .. where .. [[
+        GROUP BY page_stat.id_book
+        HAVING duration_seconds > 0
+        ORDER BY duration_seconds DESC
+        LIMIT 10
+    ]], function(stmt)
+        for row in stmt:rows() do
+            local title = row[1] or ""
+            if title == "" or title == "N/A" then title = "未知书名" end
+            table.insert(books, {
+                title    = title,
+                duration = tonumber(row[2]) or 0,
+            })
+        end
     end)
+    return books
 end
 
 -- ===================== 格式化 =====================
@@ -377,6 +384,7 @@ function ReadingStatsView:faces()
         unit    = Font:getFace("cfont", 22),   -- 大数字的单位（小时 / 分钟），比数字小一档
         caption = Font:getFace("cfont", 15),   -- 卡片内小字说明
         card    = Font:getFace("tfont", 18),   -- 卡片标题
+        header  = Font:getFace("tfont", 26),   -- 顶栏标题（本周·2026年09月）
         body    = Font:getFace("cfont", 16),   -- 正文 / 列表
         small   = Font:getFace("cfont", 13),   -- 柱图刻度
         tab     = Font:getFace("cfont", 18),   -- 周期标签
@@ -757,34 +765,44 @@ function ReadingStatsView:buildHeader()
         title = title .. "·" .. label
     end
 
-    local border = self.line_thin
-    local close_tw = TextWidget:new{ text = "关闭", face = self.fonts.body }
-    local close_w = close_tw:getSize().w + Screen:scaleBySize(24)
-    local close_h = Screen:scaleBySize(32)
-    local close_fc = FrameContainer:new{
-        bordersize = border,
-        color      = Blitbuffer.COLOR_GRAY,
-        background = Blitbuffer.COLOR_WHITE,
-        padding = 0, margin = 0,
-        CenterContainer:new{ dimen = Geom:new{ w = close_w, h = close_h }, close_tw },
-    }
-    -- 标题在整屏居中：左右预留对称空间（左侧留出与「关闭」等宽的区域）
-    local close_cell_w = close_w + 2 * border
     local gap    = Size.padding.default
     local margin = Size.padding.large
-    local title_w = math.max(1, self.screen_w - 2 * close_cell_w - 2 * margin - gap)
-    local title_tw = TextWidget:new{ text = title, face = self.fonts.card, max_width = title_w }
-    local row_h = math.max(title_tw:getSize().h, close_h + 2 * border)
 
-    local left_pad = close_cell_w + margin
-    self:addHitRect(left_pad + title_w + gap, 0, close_cell_w, row_h, function() self:onClose() end)
+    -- 左侧返回键：纯文字 "<< 返回"，无框，字体/字号与中间标题一致（点它 = 关闭/返回）
+    local back_tw = TextWidget:new{ text = "<< 返回", face = self.fonts.header }
+    local back_w = back_tw:getSize().w
+
+    -- 标题在整屏真正居中：左右各留一个与「返回键区」等宽的占位（margin + 返回键 + gap），
+    -- 这样中间标题的视觉中心 == 屏幕中心，而不是被返回键挤偏
+    local side_w = margin + back_w + gap
+    local title_w = math.max(1, self.screen_w - 2 * side_w)
+    local title_tw = TextWidget:new{ text = title, face = self.fonts.header, max_width = title_w }
+    local row_h = math.max(title_tw:getSize().h, back_tw:getSize().h)
+
+    -- 返回键容器：默认白底（与背景融合，看不出框），点击时整块反色（黑底白字）做反馈
+    local back_cell = FrameContainer:new{
+        bordersize = 0, background = Blitbuffer.COLOR_WHITE, padding = 0, margin = 0,
+        CenterContainer:new{ dimen = Geom:new{ w = back_w, h = row_h }, back_tw },
+    }
+
+    -- 命中区覆盖左侧返回键；点击只让返回键自己反色闪一下再关闭（_closing 防连点）
+    self:addHitRect(0, 0, side_w, row_h, function()
+        if self._closing then return end
+        self._closing = true
+        back_cell.background = Blitbuffer.COLOR_BLACK
+        back_tw.fgcolor = Blitbuffer.COLOR_WHITE
+        UIManager:setDirty(self, function() return "ui", self.dimen end)
+        UIManager:scheduleIn(0.15, function() self:onClose() end)
+    end)
 
     local row = HorizontalGroup:new{
         align = "center",
-        HorizontalSpan:new{ width = left_pad },
+        HorizontalSpan:new{ width = margin },
+        back_cell,
+        HorizontalSpan:new{ width = gap },
         CenterContainer:new{ dimen = Geom:new{ w = title_w, h = row_h }, title_tw },
         HorizontalSpan:new{ width = gap },
-        close_fc,
+        HorizontalSpan:new{ width = back_w },
         HorizontalSpan:new{ width = margin },
     }
 
@@ -818,24 +836,35 @@ function ReadingStatsView:init()
     -- 数据
     self.bounds = getPeriodBounds(self.mode, self.base_time)
     local b = self.bounds
-    local sum = fetchSummary(b)
-    local extra = fetchExtras(b)
-    self.data = {
-        total    = sum.duration,
-        days     = sum.days,
-        books    = sum.books,
-        max_day  = sum.max_day,
-        finished = extra.finished,
-        notes    = extra.notes,
-        buckets  = fetchBuckets(self.mode, b),
-        books_top = fetchTopBooks(b),
-        prefer   = fetchPreference(b),
-    }
-    if self.mode ~= "total" and b.prev_base then
-        local prev = fetchSummary(getPeriodBounds(self.mode, b.prev_base))
-        if prev.duration > 0 then
-            self.data.compare = (self.data.total - prev.duration) / prev.duration
+    -- 命中缓存则直接复用（重进同一周期不再查库）；否则一次 init 只开一次库、所有查询复用同一连接
+    local cache_key = self.mode .. ":" .. tostring(self.base_time or 0)
+    local cached    = _view_cache[cache_key]
+    if cached and (os.time() - cached.ts) < _VIEW_CACHE_TTL then
+        self.data   = cached.data
+        self.bounds = cached.bounds
+    else
+        local conn  = openStatsDb()
+        local sum   = fetchSummary(conn, b)
+        local extra = fetchExtras(conn, b)
+        self.data = {
+            total    = sum.duration,
+            days     = sum.days,
+            books    = sum.books,
+            max_day  = sum.max_day,
+            finished = extra.finished,
+            notes    = extra.notes,
+            buckets  = fetchBuckets(conn, self.mode, b),
+            books_top = fetchTopBooks(conn, b),
+            prefer   = fetchPreference(conn, b),
+        }
+        if self.mode ~= "total" and b.prev_base then
+            local prev = fetchSummary(conn, getPeriodBounds(self.mode, b.prev_base))
+            if prev.duration > 0 then
+                self.data.compare = (self.data.total - prev.duration) / prev.duration
+            end
         end
+        if conn then conn:close() end
+        cacheStore(cache_key, { ts = os.time(), data = self.data, bounds = self.bounds })
     end
 
     self.caption_text = CAPTION[self.mode] or "累计阅读"
