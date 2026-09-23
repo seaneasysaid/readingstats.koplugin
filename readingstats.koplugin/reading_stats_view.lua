@@ -767,6 +767,7 @@ function ReadingStatsView:buildHeader()
 
     local gap    = Size.padding.default
     local margin = Size.padding.large
+    local top_pad = Screen:scaleBySize(12) -- 顶栏整体下移一点，避免贴屏幕顶边不好点
 
     -- 左侧返回键：纯文字 "<< 返回"，无框，字体/字号与中间标题一致（点它 = 关闭/返回）
     local back_tw = TextWidget:new{ text = "<< 返回", face = self.fonts.header }
@@ -785,8 +786,8 @@ function ReadingStatsView:buildHeader()
         CenterContainer:new{ dimen = Geom:new{ w = back_w, h = row_h }, back_tw },
     }
 
-    -- 命中区覆盖左侧返回键；点击只让返回键自己反色闪一下再关闭（_closing 防连点）
-    self:addHitRect(0, 0, side_w, row_h, function()
+    -- 命中区覆盖左侧返回键（含顶部留白，命中更高更好点）；点击只让返回键反色闪一下再关闭
+    self:addHitRect(0, 0, side_w, top_pad + row_h, function()
         if self._closing then return end
         self._closing = true
         back_cell.background = Blitbuffer.COLOR_BLACK
@@ -808,6 +809,7 @@ function ReadingStatsView:buildHeader()
 
     return VerticalGroup:new{
         align = "left",
+        VerticalSpan:new{ width = top_pad }, -- 顶部留白：把标题/返回整体下移
         row,
         LineWidget:new{
             dimen = Geom:new{ w = self.screen_w, h = self.line_thin },
