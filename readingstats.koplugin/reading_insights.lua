@@ -259,6 +259,24 @@ local MONTH_NAMES_FULL = {
     _("August"), _("September"), _("October"), _("November"), _("December"),
 }
 
+-- 月份标签一律以 month_num 为准重建。
+-- settings.reader.lua 里持久化的旧缓存可能残留错位的 label_full（5 号位曾是 June），
+-- 而渲染走缓存命中路径、不会经过 SQL 重建，所以必须在读取处统一纠正。
+local function normalizeMonthLabels(months)
+    if type(months) ~= "table" then return months end
+    for _, m in ipairs(months) do
+        if type(m) == "table" then
+            local n = tonumber(m.month_num) or tonumber(tostring(m.month or ""):match("(%d%d)$"))
+            if n and n >= 1 and n <= 12 then
+                m.month_num = n
+                m.label = MONTH_NAMES_SHORT[n]
+                m.label_full = MONTH_NAMES_FULL[n]
+            end
+        end
+    end
+    return months
+end
+
 local db_path = DataStorage:getSettingsDir() .. "/statistics.sqlite3"
 local ReadingInsightsPopup
 
@@ -1392,14 +1410,7 @@ function ReadingInsightsPopup:getMonthlyReadingDays(year)
             })
         end
 
-        for _, m in ipairs(months) do
-            -- 始终按 month_num 重建标签：缓存里可能残留旧的（错误）label_full，靠 not m.label_full 判断会永远修不回来
-            local month_num = m.month_num or tonumber(tostring(m.month):match("%d+$"))
-            if month_num then
-                m.label = MONTH_NAMES_SHORT[month_num] or m.label
-                m.label_full = MONTH_NAMES_FULL[month_num] or m.label_full
-            end
-        end
+        normalizeMonthLabels(months)
 
         insightsCache.monthlyReadingDays = insightsCache.monthlyReadingDays or {}
         insightsCache.monthlyReadingDays[year] = months
@@ -1450,14 +1461,7 @@ function ReadingInsightsPopup:getMonthlyReadingHours(year)
             })
         end
 
-        for _, m in ipairs(months) do
-            -- 始终按 month_num 重建标签：缓存里可能残留旧的（错误）label_full，靠 not m.label_full 判断会永远修不回来
-            local month_num = m.month_num or tonumber(tostring(m.month):match("%d+$"))
-            if month_num then
-                m.label = MONTH_NAMES_SHORT[month_num] or m.label
-                m.label_full = MONTH_NAMES_FULL[month_num] or m.label_full
-            end
-        end
+        normalizeMonthLabels(months)
 
         insightsCache.monthlyReadingHours = insightsCache.monthlyReadingHours or {}
         insightsCache.monthlyReadingHours[year] = months
@@ -2122,12 +2126,17 @@ end
 
 local function populateEverything(popup_self, year, yearRange)
     logger.info("READING-INSIGHTS-POPUP: POPULATE EVERYTHING CALLED")
+    -- 缓存命中路径也要走一遍标签重建，否则 settings 里的旧错位数据会一直显示下去
+    local monthly_days = insightsCache.monthlyReadingDays and insightsCache.monthlyReadingDays[year]
+        or popup_self:getMonthlyReadingDays(year)
+    local monthly_hours = insightsCache.monthlyReadingHours and insightsCache.monthlyReadingHours[year]
+        or popup_self:getMonthlyReadingHours(year)
     return {
         yearRange = yearRange,
         streaks = insightsCache.streaks or popup_self:calculateStreaks(),
         yearlyStats = insightsCache.yearlyStats and insightsCache.yearlyStats[year] or popup_self:getYearlyStats(year),
-        monthlyReadingDays = insightsCache.monthlyReadingDays and insightsCache.monthlyReadingDays[year] or popup_self:getMonthlyReadingDays(year),
-        monthlyReadingHours = insightsCache.monthlyReadingHours and insightsCache.monthlyReadingHours[year] or popup_self:getMonthlyReadingHours(year),
+        monthlyReadingDays = normalizeMonthLabels(monthly_days),
+        monthlyReadingHours = normalizeMonthLabels(monthly_hours),
     }
 end
 
