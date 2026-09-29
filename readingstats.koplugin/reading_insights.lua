@@ -72,6 +72,8 @@ local PATCH_L10N = {
         ["April"] = "April", ["June"] = "June", ["July"] = "July", ["August"] = "August",
         ["September"] = "September", ["October"] = "October", ["November"] = "November",
         ["December"] = "December",
+        -- "May" 短名已被上月名表占用，长名用独立键（原 MONTH_NAMES_FULL 5 号位误写成 June）
+        ["May (long)"] = "May",
         ["second read"] = "second read", ["seconds read"] = "seconds read",
         ["minute read"] = "minute read", ["minutes read"] = "minutes read",
         ["hour read"] = "hour read", ["hours read"] = "hours read",
@@ -121,6 +123,7 @@ local PATCH_L10N = {
         ["April"] = "四月", ["June"] = "六月", ["July"] = "七月", ["August"] = "八月",
         ["September"] = "九月", ["October"] = "十月", ["November"] = "十一月",
         ["December"] = "十二月",
+        ["May (long)"] = "五月",
         ["second read"] = "秒阅读", ["seconds read"] = "秒阅读",
         ["minute read"] = "分钟阅读", ["minutes read"] = "分钟阅读",
         ["hour read"] = "小时阅读", ["hours read"] = "小时阅读",
@@ -171,6 +174,7 @@ local PATCH_L10N = {
         ["April"] = "Tháng 4", ["June"] = "Tháng 6", ["July"] = "Tháng 7", ["August"] = "Tháng 8",
         ["September"] = "Tháng 9", ["October"] = "Tháng 10", ["November"] = "Tháng 11",
         ["December"] = "Tháng 12",
+        ["May (long)"] = "Tháng 5",
         ["second read"] = "giây đã đọc", ["seconds read"] = "giây đã đọc",
         ["minute read"] = "phút đã đọc", ["minutes read"] = "phút đã đọc",
         ["hour read"] = "giờ đã đọc", ["hours read"] = "giờ đã đọc",
@@ -251,7 +255,7 @@ local MONTH_NAMES_SHORT = {
     _("Jul"), _("Aug"), _("Sep"), _("Oct"), _("Nov"), _("Dec"),
 }
 local MONTH_NAMES_FULL = {
-    _("January"), _("February"), _("March"), _("April"), _("June"), _("July"),
+    _("January"), _("February"), _("March"), _("April"), _("May (long)"), _("June"), _("July"),
     _("August"), _("September"), _("October"), _("November"), _("December"),
 }
 
@@ -364,10 +368,12 @@ local function clearCacheIfRequired()
         return set_cache_partialClear_timestamp(latest_db_mod_timestamp)
     end
 
+    local cached_streaks = insightsCache.streaks
     if latest_db_mod_timestamp < (ts_midnight_today - 86400) and
-        insightsCache.streaks and
-        insightsCache.streaks.current_days and
-        insightsCache.streaks.current_days ~= 0 then
+        cached_streaks and
+        cached_streaks.days and cached_streaks.days.current and
+        (cached_streaks.days.current ~= 0 or
+            (cached_streaks.weeks and cached_streaks.weeks.current or 0) ~= 0) then
         logger.info("READING-INSIGHTS-POPUP: CLEARING CACHED STREAKS")
         insightsCache.streaks = nil
         uploadInsightsCacheToGReader("clearCacheIfRequired")
@@ -1387,12 +1393,11 @@ function ReadingInsightsPopup:getMonthlyReadingDays(year)
         end
 
         for _, m in ipairs(months) do
-            if not m.label_full then
-                local month_num = m.month_num or tonumber(m.month:match("%d+$"))
-                if month_num then
-                    m.label = MONTH_NAMES_SHORT[month_num] or m.label
-                    m.label_full = MONTH_NAMES_FULL[month_num] or m.label_full
-                end
+            -- 始终按 month_num 重建标签：缓存里可能残留旧的（错误）label_full，靠 not m.label_full 判断会永远修不回来
+            local month_num = m.month_num or tonumber(tostring(m.month):match("%d+$"))
+            if month_num then
+                m.label = MONTH_NAMES_SHORT[month_num] or m.label
+                m.label_full = MONTH_NAMES_FULL[month_num] or m.label_full
             end
         end
 
@@ -1446,12 +1451,11 @@ function ReadingInsightsPopup:getMonthlyReadingHours(year)
         end
 
         for _, m in ipairs(months) do
-            if not m.label_full then
-                local month_num = m.month_num or tonumber(m.month:match("%d+$"))
-                if month_num then
-                    m.label = MONTH_NAMES_SHORT[month_num] or m.label
-                    m.label_full = MONTH_NAMES_FULL[month_num] or m.label_full
-                end
+            -- 始终按 month_num 重建标签：缓存里可能残留旧的（错误）label_full，靠 not m.label_full 判断会永远修不回来
+            local month_num = m.month_num or tonumber(tostring(m.month):match("%d+$"))
+            if month_num then
+                m.label = MONTH_NAMES_SHORT[month_num] or m.label
+                m.label_full = MONTH_NAMES_FULL[month_num] or m.label_full
             end
         end
 
