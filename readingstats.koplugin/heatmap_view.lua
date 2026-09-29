@@ -127,6 +127,9 @@ end
 -- ============================================================
 
 local function dbOpen()
+    -- 先确认文件存在：sqlite 打开一个不存在的路径会直接新建出空库文件
+    local lfs = require("libs/libkoreader-lfs")
+    if lfs.attributes(db_location, "mode") ~= "file" then return nil end
     local ok, conn = pcall(SQ3.open, db_location)
     if ok and conn then return conn end
     return nil

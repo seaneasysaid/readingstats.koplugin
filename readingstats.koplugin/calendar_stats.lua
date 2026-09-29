@@ -1,7 +1,6 @@
 local Blitbuffer      = require("ffi/blitbuffer")
 local Button          = require("ui/widget/button")
 local CenterContainer = require("ui/widget/container/centercontainer")
-local LeftContainer   = require("ui/widget/container/leftcontainer")
 local DataStorage     = require("datastorage")
 local db_location     = DataStorage:getSettingsDir() .. "/statistics.sqlite3"
 local Device          = require("device")
@@ -16,10 +15,8 @@ local HorizontalSpan  = require("ui/widget/horizontalspan")
 local InputContainer  = require("ui/widget/container/inputcontainer")
 local LineWidget      = require("ui/widget/linewidget")
 local OverlapGroup    = require("ui/widget/overlapgroup")
-local ReaderFooter    = require("apps/reader/modules/readerfooter")
 local ReaderUI        = require("apps/reader/readerui")
 local Screen          = Device.screen
-local Size            = require("ui/size")
 local SQ3             = require("lua-ljsqlite3/init")
 local TextBoxWidget   = require("ui/widget/textboxwidget")
 local TextWidget      = require("ui/widget/textwidget")
@@ -29,9 +26,7 @@ local VerticalSpan    = require("ui/widget/verticalspan")
 local Widget          = require("ui/widget/widget")
 local logger          = require("logger")
 local _ = require("gettext")
-local N_ = _.ngettext
 
-local FONT_BOLD = "NotoSans-Bold.ttf"
 local FONT_REG  = "NotoSans-Regular.ttf"
 
 local ColorBox = Widget:extend{ _w = 1, _h = 1, _bg = nil, _r = 0, _border = nil, _bw = 0 }
@@ -98,7 +93,6 @@ local DEEP_FILL   = makeGray(0x20)
 local SECS_DAY = 86400
 local WHITE  = Blitbuffer.COLOR_WHITE
 local BLACK  = Blitbuffer.COLOR_BLACK
-local GRAY_4 = Blitbuffer.COLOR_GRAY_4 or Blitbuffer.COLOR_GRAY_3
 
 local STAT_ORDER = {
     "today_time", "today_pages",
@@ -181,6 +175,9 @@ local function daysInMonth(y, m)
 end
 
 local function dbOpen()
+    -- 先确认文件存在：sqlite 打开一个不存在的路径会直接新建出空库文件
+    local lfs = require("libs/libkoreader-lfs")
+    if lfs.attributes(db_location, "mode") ~= "file" then return nil end
     local ok, conn = pcall(SQ3.open, db_location)
     if ok and conn then return conn end
     return nil
@@ -409,22 +406,19 @@ local function cellTextColor(secs)
     return BLACK
 end
 
+-- 每项只保留 label / get：原先的 sub / sub_fn 没有任何界面读取，属历史遗留
 local STAT_DEFS = {
-    today_time  = { label = _("今日时长"), get = function(s) return fmtTime(s.today_secs) end,    sub = _("今日阅读时长") },
-    today_pages = { label = _("今日页数"), get = function(s) return tostring(s.today_pages) end,  sub = _("今日阅读页数") },
-    week_time   = { label = _("本周时长"), get = function(s) return fmtTime(s.week_secs) end,     sub = _("本周阅读时长") },
-    week_pages  = { label = _("本周页数"), get = function(s) return tostring(s.week_pages) end,   sub = _("本周阅读页数") },
-    month_time  = { label = _("本月时长"), get = function(s) return fmtTime(s.month_secs) end,    sub = _("本月阅读时长") },
-    month_pages = { label = _("本月页数"), get = function(s) return tostring(s.month_pages) end,  sub = _("本月阅读页数") },
-    total_time  = { label = _("累计时长"), get = function(s) return fmtTime(s.total_secs) end,    sub = _("累计阅读时长") },
-    total_pages = { label = _("累计页数"), get = function(s) return tostring(s.total_pages) end,  sub = _("累计阅读页数") },
+    today_time  = { label = _("今日时长"), get = function(s) return fmtTime(s.today_secs) end },
+    today_pages = { label = _("今日页数"), get = function(s) return tostring(s.today_pages) end },
+    week_time   = { label = _("本周时长"), get = function(s) return fmtTime(s.week_secs) end },
+    week_pages  = { label = _("本周页数"), get = function(s) return tostring(s.week_pages) end },
+    month_time  = { label = _("本月时长"), get = function(s) return fmtTime(s.month_secs) end },
+    month_pages = { label = _("本月页数"), get = function(s) return tostring(s.month_pages) end },
+    total_time  = { label = _("累计时长"), get = function(s) return fmtTime(s.total_secs) end },
+    total_pages = { label = _("累计页数"), get = function(s) return tostring(s.total_pages) end },
     streak      = {
         label = _("连续天数"),
         get   = function(s) return s.streak > 0 and tostring(s.streak) or "—" end,
-        sub_fn = function(s)
-            if s.streak == 0 then return _("暂无连续") end
-            return N_("天连续", "天连续", s.streak)
-        end,
     },
 }
 
@@ -823,19 +817,6 @@ function CalendarStatsWindow:_build()
         local bg = cellFill(s)
         local fg = cellTextColor(s)
 
-        if logger.dbg then
-            local m = secsToTotalMinutes(s)
-            local tier = "white"
-            if m <= 0 then tier = "empty"
-            elseif m <= 30 then tier = "light"
-            elseif m <= 60 then tier = "medium"
-            elseif m <= 90 then tier = "dark"
-            else tier = "deep" end
-            logger.dbg(string.format(
-                "[calendar_stats] day=%s secs=%d total_min=%d tier=%s",
-                tostring(day), math.floor(s), m, tier))
-        end
-
         local time_str = fmtCellTime(s)
 
         local date_widget = TextWidget:new {
@@ -1162,19 +1143,16 @@ local function showCalendarStats()
     UIManager:show(w, "ui")
 end
 
-function ReaderUI:onCalendarStats()
-    if self.statistics and self.statistics.insertDB then
-        pcall(function() self.statistics:insertDB() end)
+-- 两个宿主（阅读中 / 文件管理器）行为完全一致：先落库再开窗
+local function flushStatsAndShow(ui_self)
+    if ui_self.statistics and ui_self.statistics.insertDB then
+        pcall(function() ui_self.statistics:insertDB() end)
     end
     showCalendarStats()
 end
 
-function FileManager:onCalendarStats()
-    if self.statistics and self.statistics.insertDB then
-        pcall(function() self.statistics:insertDB() end)
-    end
-    showCalendarStats()
-end
+function ReaderUI:onCalendarStats()    flushStatsAndShow(self) end
+function FileManager:onCalendarStats() flushStatsAndShow(self) end
 
 local _M = {}
 _M.show = showCalendarStats

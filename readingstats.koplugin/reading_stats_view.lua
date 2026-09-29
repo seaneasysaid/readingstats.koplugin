@@ -16,8 +16,6 @@ local Geom                = require("ui/geometry")
 local GestureRange        = require("ui/gesturerange")
 local HorizontalGroup     = require("ui/widget/horizontalgroup")
 local HorizontalSpan      = require("ui/widget/horizontalspan")
-local InputContainer      = require("ui/widget/container/inputcontainer")
-local LeftContainer       = require("ui/widget/container/leftcontainer")
 local LineWidget          = require("ui/widget/linewidget")
 local OverlapGroup        = require("ui/widget/overlapgroup")
 local RightContainer      = require("ui/widget/container/rightcontainer")
@@ -54,9 +52,11 @@ local function openStatsDb()
         logger.warn("READING_STATS_VIEW: statistics.sqlite3 不存在: " .. db_path)
         return nil
     end
-    local conn = SQ3.open(db_path)
-    if not conn then
-        logger.err("READING_STATS_VIEW: 打开统计库失败: " .. db_path)
+    -- 库损坏时 SQ3.open 会抛异常；兜住，否则整个视图初始化直接失败
+    local ok, conn = pcall(SQ3.open, db_path)
+    if not ok or not conn then
+        logger.err("READING_STATS_VIEW: 打开统计库失败: " .. db_path .. " " .. tostring(conn))
+        return nil
     end
     return conn
 end
@@ -157,7 +157,7 @@ end
 
 -- ===================== 数据查询 =====================
 local function fetchSummary(conn, b)
-    local s = { duration = 0, days = 0, books = 0, max_day = 0 }
+    local s = { duration = 0, days = 0, books = 0 }
     if not conn then return s end
     local where = string.format("start_time >= %d AND start_time < %d", b.start_ts, b.end_ts)
     withStatement(conn,
@@ -169,14 +169,6 @@ local function fetchSummary(conn, b)
                 s.duration = tonumber(row[1]) or 0
                 s.days     = tonumber(row[2]) or 0
                 s.books    = tonumber(row[3]) or 0
-            end
-        end)
-    withStatement(conn,
-        "SELECT COALESCE(MAX(d),0) FROM (SELECT SUM(duration) AS d FROM page_stat WHERE "
-        .. where .. " GROUP BY date(start_time,'unixepoch','localtime'))",
-        function(stmt)
-            for row in stmt:rows() do
-                s.max_day = tonumber(row[1]) or 0
             end
         end)
     return s
@@ -380,7 +372,6 @@ local function fmtDuration(sec)
     return string.format("%d分钟", m)
 end
 
-local fmtDurationShort = fmtDuration -- 列表 / 比例条用
 
 -- 柱图数值轴刻度：15小时 / 4.5小时 / 45分钟 / <1分钟 / 0
 local function fmtAxis(sec)
@@ -394,9 +385,6 @@ local function fmtAxis(sec)
     if sec > 0 then return "<1分钟" end
     return "0"
 end
-
--- 概览卡片的大数字也走同一套格式（99小时18分钟 / 45分钟）
-local fmtDurationTitle = fmtDuration
 
 -- ===================== 视图 =====================
 local ReadingStatsView = FocusManager:extend{
@@ -505,7 +493,7 @@ function ReadingStatsView:buildOverviewCard()
         fgcolor = Blitbuffer.COLOR_GRAY_7 }
     local reserve = cap_tw:getSize().w + Size.padding.default
     local big_tw = TextWidget:new{
-        text = fmtDurationTitle(d.total), face = f.big,
+        text = fmtDuration(d.total), face = f.big,
         max_width = math.max(1, self.content_width - reserve),
     }
     table.insert(content, HorizontalGroup:new{
@@ -638,7 +626,7 @@ function ReadingStatsView:buildRankCard()
         end
         table.insert(content, self:proportionBar(
             string.format("%d. %s", i, it.title),
-            fmtDurationShort(it.duration),
+            fmtDuration(it.duration),
             it.duration / maxs))
     end
     return self:makeCard(content)
@@ -655,7 +643,7 @@ function ReadingStatsView:buildPreferenceCard()
     local content = VerticalGroup:new{ align = "left", self:widthPin(), self:cardTitle("阅读偏好") }
     for _, b in ipairs(buckets) do
         local ratio = b.dur / total
-        table.insert(content, self:proportionBar(b.name, fmtDurationShort(b.dur), ratio))
+        table.insert(content, self:proportionBar(b.name, fmtDuration(b.dur), ratio))
         table.insert(content, VerticalSpan:new{ width = Size.padding.small })
     end
 
@@ -880,7 +868,6 @@ function ReadingStatsView:init()
             total    = sum.duration,
             days     = sum.days,
             books    = sum.books,
-            max_day  = sum.max_day,
             finished = extra.finished,
             notes    = extra.notes,
             buckets  = fetchBuckets(conn, self.mode, b),

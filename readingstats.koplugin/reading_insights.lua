@@ -9,7 +9,6 @@ local ConfirmBox = require("ui/widget/confirmbox")
 local DataStorage = require("datastorage")
 local Device = require("device")
 local Dispatcher = require("dispatcher")
-local Event = require("ui/event")
 local FileManager = require("apps/filemanager/filemanager")
 local FocusManager = require("ui/widget/focusmanager")
 local Font = require("ui/font")
@@ -33,7 +32,6 @@ local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
-local Widget = require("ui/widget/widget")
 local Screen = Device.screen
 local gettext = require("gettext")
 local T = require("ffi/util").template
@@ -318,7 +316,7 @@ end
 local function getDbModTime()
     local lfs = require("libs/libkoreader-lfs")
     local attr = lfs.attributes(db_path, "modification")
-    return attr and attr or 0
+    return attr or 0
 end
 
 local function clearCache(year)
@@ -418,12 +416,17 @@ end
 
 local function withStatement(conn, sql, fn)
     local stmt = conn:prepare(sql)
-    if not stmt then return end
+    if not stmt then
+        logger.err("READING-INSIGHTS-POPUP: SQL prepare 失败: " .. tostring(sql))
+        return
+    end
     local ok, result = pcall(fn, stmt)
     stmt:close()
     if ok then
         return result
     end
+    logger.err("READING-INSIGHTS-POPUP: SQL 执行失败: " .. tostring(result)
+        .. " | " .. tostring(sql))
 end
 
 local function computeStreaks(entries_desc, is_consecutive, is_current_start, weeksOrDays)
@@ -437,6 +440,7 @@ local function computeStreaks(entries_desc, is_consecutive, is_current_start, we
         return a
     elseif #entries_desc == 1 then
         a.best = 1
+        a.best_start, a.best_end = 1, 1
         if is_current_start(entries_desc[1][1]) then
             a.current = 1
         end
@@ -458,8 +462,11 @@ local function computeStreaks(entries_desc, is_consecutive, is_current_start, we
 
     local best = 1
     local run = 1
-    local best_start = 0
-    local best_end = 0
+    -- 默认指向第 1 条记录：若所有记录两两都不连续，下面会走到
+    -- entries_desc[best_start] 而 best_start 仍是 0 → 索引 nil 抛错，
+    -- 该错误被 withStatsDb 的 pcall 吞掉后，连读数据整体静默归零。
+    local best_start = 1
+    local best_end = 1
     local best_end_temp = 0
     for i = 2, #entries_desc do
         if is_consecutive(entries_desc[i - 1][1], entries_desc[i][1]) then
@@ -588,9 +595,11 @@ local function buildYearHeader(popup_self, font_section, layout, yearRange)
     -- 少声明一个就会变成全局变量，多实例时会「关错对话框」。
     local year_button_tap_dialog, year_button_hold_dialog
     local tap_buttons = {}
-    local yearCount = popup_self.yearRange.max_year - popup_self.yearRange.min_year
+    -- 与上面的 prev_enabled / next_enabled 一样，统一用传入的 yearRange，
+    -- 不再混用 popup_self.yearRange（两者本应同源，混用容易在其中一处未赋值时取到 nil）
+    local yearCount = yearRange.max_year - yearRange.min_year
     if yearCount >= 1 then
-        for i = popup_self.yearRange.min_year, popup_self.yearRange.max_year do
+        for i = yearRange.min_year, yearRange.max_year do
             local a = {
                 text = i,
                 callback = function()
