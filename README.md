@@ -2,6 +2,7 @@
 
 [![Release](https://img.shields.io/github/v/release/seaneasysaid/readingstats.koplugin)](https://github.com/seaneasysaid/readingstats.koplugin/releases/latest)
 [![下载](https://img.shields.io/github/downloads/seaneasysaid/readingstats.koplugin/total)](https://github.com/seaneasysaid/readingstats.koplugin/releases/latest)
+[![更新日志](https://img.shields.io/badge/更新日志-CHANGELOG-blue)](CHANGELOG.md)
 
 > KOReader 插件 —— 把阅读记录变成一张看得见的图。
 > 菜单进入，无需手势；阅读报告 + 日历热力图 + GitHub 风格全年贡献图 + 阅读分析，四视图并存。
