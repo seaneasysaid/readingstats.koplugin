@@ -47,7 +47,7 @@
 
 顶部标题居中（如 `本月·2026年09月`），下面一排 **周 / 月 / 年 / 总** 周期切换条；主体为四张卡片：**概览 / 阅读时长趋势 / 读书排行 / 阅读偏好**；底部为 `上一周期 / 下一周期`。
 
-<img src="docs/screenshots/09-report-month.png" alt="阅读报告 · 本月" width="500" />
+<img src="docs/screenshots/09-report-month-2026-10.png" alt="阅读报告 · 本月" width="500" />
 
 ### ② 日历阅读统计
 
