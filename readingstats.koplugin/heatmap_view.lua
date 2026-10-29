@@ -11,7 +11,6 @@
 -- 注意：绝不能用 `_` 当循环变量，会遮蔽上面的 gettext。
 
 local Blitbuffer      = require("ffi/blitbuffer")
-local Button          = require("ui/widget/button")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local DataStorage     = require("datastorage")
 local db_location     = DataStorage:getSettingsDir() .. "/statistics.sqlite3"
@@ -38,11 +37,15 @@ local SECS_DAY = 86400
 local WHITE    = Blitbuffer.COLOR_WHITE
 local BLACK    = Blitbuffer.COLOR_BLACK
 
-local FONT_BOLD = "NotoSans-Bold.ttf"
-local FONT_REG  = "NotoSans-Regular.ttf"
+-- 字体：用 fontmap 别名，才能跟随系统 UI 字体设置
+--   cfont = UI 正文（默认映射 NotoSans-Regular）
+--   tfont = UI 粗体（默认映射 NotoSans-Bold）
+-- 直接写 "NotoSans-Regular.ttf" 会绕过 patches/2--ui-font.lua 的替换
+local FONT_BOLD = "tfont"
+local FONT_REG  = "cfont"
 
 -- ============================================================
--- 设置（与月历的 mini_rs_sett 分开存，避免互相覆盖）
+-- 热力图设置单独存（月历侧的设置项已移除，不再有覆盖问题）
 -- ============================================================
 
 local HM_DEFAULTS = { weeks = 26 }
@@ -120,6 +123,22 @@ end
 
 local function colorBox(w, h, bg, r, border, bw)
     return ColorBox:new{ _w = w, _h = h, _bg = bg, _r = r or 0, _border = border, _bw = bw or 0 }
+end
+
+-- 记录子树在屏幕上的绝对位置，供窗口级 onTap 做命中判断。
+-- 窗口自己注册了全屏 Tap 手势，子控件（Button 等）根本收不到点击事件，
+-- 所以只能等 paintTo 拿到绝对坐标后自己算命中区。
+local TapZone = Widget:extend{}
+
+function TapZone:getSize()
+    if self[1] then return self[1]:getSize() end
+    return Geom:new{ w = 0, h = 0 }
+end
+
+function TapZone:paintTo(bb, x, y)
+    local s = self[1]:getSize()
+    self.rect = { x = x, y = y, w = s.w, h = s.h }
+    self[1]:paintTo(bb, x, y)
 end
 
 -- ============================================================
@@ -280,6 +299,7 @@ end
 -- 翻页：整段位移（不重叠），不允许翻到未来
 function HeatmapWindow:_switchTo(offset)
     if offset > 0 then offset = 0 end
+    if offset == (self._offset or 0) then return end   -- 已经在最近一段，点是空操作
     UIManager:close(self)
     UIManager:show(HeatmapWindow:new { _offset = offset, _weeks = self._weeks }, "ui")
 end
@@ -296,10 +316,12 @@ function HeatmapWindow:_build()
     local CORNER_R     = Screen:scaleBySize(12)
     local CELL_R       = Screen:scaleBySize(1)  -- 近方形；圆角大了会像胶囊
     local SECTION_GAP  = Screen:scaleBySize(10)
-    local NAV_BTN_PAD  = Screen:scaleBySize(6)
     local GAP          = Screen:scaleBySize(2)
     local CELL_MAX     = Screen:scaleBySize(44) -- 单格上限，防止极端宽屏上格子过大
     local MONTH_H      = Screen:scaleBySize(14)
+    -- 标题行高度（与「日历阅读统计」的翻页框同高，手指好点）
+    local TITLE_H      = Screen:scaleBySize(30)
+    local SUB_H        = Screen:scaleBySize(18)
 
     local function scaleLine(v)
         local s = Screen:scaleBySize(v)
@@ -309,7 +331,7 @@ function HeatmapWindow:_build()
     local FRAME_BORDER = scaleLine(0.6)
     local CELL_BW      = scaleLine(0.4)
 
-    local face_title = Font:getFace(FONT_BOLD, 18)
+    local face_title = Font:getFace(FONT_BOLD, 22)
     local face_sub   = Font:getFace(FONT_REG,  14)
     local face_tiny  = Font:getFace(FONT_REG,  11)
 
@@ -363,7 +385,7 @@ function HeatmapWindow:_build()
     -- 再按高度算：整块（月份标签 + 7 行网格）要能塞进屏幕
     local function cellByHeight()
         -- 窗口里除网格外的固定高度
-        local fixed_h = 26 + 2 + 18 + SECTION_GAP          -- 标题 + 区间
+        local fixed_h = TITLE_H + 2 + SUB_H                 -- 标题 + 区间
                       + SECTION_GAP + 16 + 6 + 18          -- 图例 + 汇总
                       + (FRAME_PAD + FRAME_BORDER) * 2
         local block_fixed = row_blocks * (MONTH_H + Screen:scaleBySize(4) + GAP * 6)
@@ -395,36 +417,78 @@ function HeatmapWindow:_build()
         span_str = span_str .. string.format(_("（%d行）"), row_blocks)
     end
 
-    local prev_btn = Button:new {
-        text = "◀", bordersize = 0, text_font_face = "cfont",
-        text_font_size = 12, text_font_bold = true, padding = NAV_BTN_PAD,
-        callback = function() self_ref:_prev() end,
-    }
-    local next_btn = Button:new {
-        text = "▶", bordersize = 0, text_font_face = "cfont",
-        text_font_size = 12, text_font_bold = true, padding = NAV_BTN_PAD,
-        callback = function() self_ref:_next() end,
-    }
+    local prev_btn, next_btn, title_cc_widget, range_row
+    do
+        -- < > 各套一个圆角方框（与「日历阅读统计」的翻月按钮同款），
+        -- 左右分别顶到网格两侧，手指容易点中；窗口自己算命中区。
+        local NAV_BOX_W = math.max(TITLE_H, Screen:scaleBySize(52))
+        local NAV_BOX_R = Screen:scaleBySize(6)
+        local NAV_B     = math.max(1, Screen:scaleBySize(1))
+        local NAV_FACE  = Font:getFace(FONT_BOLD, 22)
 
-    local title_row = HorizontalGroup:new {
-        align = "center",
-        TextWidget:new { text = title_str, face = face_title, fgcolor = BLACK },
-        HorizontalSpan:new { width = Screen:scaleBySize(8) },
-        prev_btn,
-        next_btn,
-    }
-    local title_cc = CenterContainer:new {
-        dimen = Geom:new { w = inner_w, h = Screen:scaleBySize(26) },
-        title_row,
-    }
+        local function makeNavBox(glyph, cb)
+            local tw = TextWidget:new { text = glyph, face = NAV_FACE, fgcolor = BLACK }
+            local box = CenterContainer:new {
+                dimen = Geom:new { w = NAV_BOX_W, h = TITLE_H },
+                FrameContainer:new {
+                    bordersize = NAV_B,
+                    radius     = NAV_BOX_R,
+                    background = WHITE,
+                    padding    = 0,
+                    CenterContainer:new {
+                        dimen = Geom:new { w = math.max(1, NAV_BOX_W - NAV_B * 2),
+                                           h = math.max(1, TITLE_H - NAV_B * 2) },
+                        tw,
+                    },
+                },
+            }
+            local zone = TapZone:new { box }
+            zone.cb = cb
+            return zone
+        end
 
-    local range_row = CenterContainer:new {
-        dimen = Geom:new { w = inner_w, h = Screen:scaleBySize(18) },
-        TextWidget:new {
-            text = range_str .. "  ·  " .. span_str,
-            face = face_sub, fgcolor = BLACK,
-        },
-    }
+        -- 按钮左右边沿对齐到「日期格子」的左右边沿（星期标签列不参与），
+        -- 所以标题行前面补一个 wd_w 的空白，跟网格用同一套缩进。
+        local nav_row_w = math.max(NAV_BOX_W * 2 + Screen:scaleBySize(60),
+                                   math.min(inner_w - wd_w, grid_w))
+        local mid_w     = math.max(1, nav_row_w - NAV_BOX_W * 2)
+
+        prev_btn = makeNavBox("<", function() self_ref:_prev() end)
+        next_btn = makeNavBox(">", function() self_ref:_next() end)
+        self._nav_zones = { prev_btn, next_btn }
+
+        local title_row = HorizontalGroup:new { align = "center" }
+        if wd_w > 0 then
+            title_row[#title_row + 1] = HorizontalSpan:new { width = wd_w }
+        end
+        title_row[#title_row + 1] = CenterContainer:new {
+            dimen = Geom:new { w = NAV_BOX_W, h = TITLE_H }, prev_btn,
+        }
+        title_row[#title_row + 1] = CenterContainer:new {
+            dimen = Geom:new { w = mid_w, h = TITLE_H },
+            TextWidget:new { text = title_str, face = face_title, fgcolor = BLACK },
+        }
+        title_row[#title_row + 1] = CenterContainer:new {
+            dimen = Geom:new { w = NAV_BOX_W, h = TITLE_H }, next_btn,
+        }
+        -- 月份标签行每列宽 = cell + GAP，末尾多留了一个 GAP；这里补上同样的尾巴，
+        -- 让标题行总宽与网格块完全一致，居中时左右才不会差 1~2px。
+        title_row[#title_row + 1] = HorizontalSpan:new { width = GAP }
+
+        local title_cc = CenterContainer:new {
+            dimen = Geom:new { w = inner_w, h = TITLE_H },
+            title_row,
+        }
+
+        range_row = CenterContainer:new {
+            dimen = Geom:new { w = inner_w, h = SUB_H },
+            TextWidget:new {
+                text = range_str .. "  ·  " .. span_str,
+                face = face_sub, fgcolor = BLACK,
+            },
+        }
+        title_cc_widget = title_cc
+    end
 
     -- 注意：HorizontalGroup 的 align 是「垂直」对齐，只认 center/top/bottom。
     -- 传 "left" 会让它走 invalid alignment 分支 —— 直接什么都不画（只往 stderr 写警告）。
@@ -566,7 +630,7 @@ function HeatmapWindow:_build()
 
     local content = VerticalGroup:new {
         align = "center",
-        title_cc,
+        title_cc_widget,
         VerticalSpan:new { width = Screen:scaleBySize(2) },
         range_row,
         VerticalSpan:new { width = SECTION_GAP },
@@ -604,7 +668,25 @@ local function _frameDimen(self)
     return c and c.dimen or nil
 end
 
-function HeatmapWindow:onTap() UIManager:close(self) end
+-- 点 < / > 翻页；点其它位置仍然关窗（保持原来的「点一下退出」手感）。
+-- 命中区用 paintTo 时记录的绝对坐标，再向外扩 8px，好点。
+function HeatmapWindow:onTap(arg1, arg2)
+    local ges = (arg2 and arg2.pos) and arg2 or arg1
+    if ges and ges.pos and self._nav_zones then
+        local pad = Screen:scaleBySize(8)
+        for _i = 1, #self._nav_zones do
+            local z = self._nav_zones[_i]
+            local r = z.rect
+            if r and ges.pos.x >= r.x - pad and ges.pos.x <= r.x + r.w + pad
+               and ges.pos.y >= r.y - pad and ges.pos.y <= r.y + r.h + pad then
+                if z.cb then z.cb() end
+                return true
+            end
+        end
+    end
+    UIManager:close(self)
+    return true
+end
 function HeatmapWindow:onSwipe(_a, _g) self:onClose() end
 function HeatmapWindow:onClose() UIManager:close(self); return true end
 HeatmapWindow.onAnyKeyPressed = HeatmapWindow.onClose

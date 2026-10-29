@@ -37,6 +37,14 @@ local gettext = require("gettext")
 local T = require("ffi/util").template
 local util = require("util")
 
+-- 字体：一律走 Font.fontmap 的别名，跟随 patches/2--ui-font.lua 对 UI 字体的替换。
+--   cfont = UI 正文（默认映射 NotoSans-Regular）
+--   tfont = UI 粗体（默认映射 NotoSans-Bold）
+-- 直接写 "NotoSans-Regular.ttf" 会绕过替换，永远只是内置 NotoSans。
+-- 没改过 UI 字体时，cfont/tfont 本身就映射到 NotoSans-Regular / NotoSans-Bold，外观不变。
+local FONT_REG  = "cfont"
+local FONT_BOLD = "tfont"
+
 -- 虚线分隔线
 local function createDashedSeparator(width)
     local dash_len = 12
@@ -554,17 +562,17 @@ end
 
 local function buildSerifFonts()
     return {
-        section = Font:getFace("NotoSans-Regular.ttf", 22),
-        value = Font:getFace("NotoSans-Bold.ttf", 32),
-        label = Font:getFace("NotoSans-Regular.ttf", 20),
-        small = Font:getFace("NotoSans-Regular.ttf", 18),
-        streakValue = Font:getFace("NotoSans-Bold.ttf", 57),
-        streakLabel = Font:getFace("NotoSans-Regular.ttf", 17),
-        streaRecordValue = Font:getFace("NotoSans-Bold.ttf", 22),
-        streakStartEndWidget = Font:getFace("NotoSans-Regular.ttf", 10),
-        author = Font:getFace("NotoSans-Regular.ttf", 14),
-        titleLine1 = Font:getFace("NotoSans-Regular.ttf", 25),
-        titleLine2 = Font:getFace("NotoSans-Regular.ttf", 14),
+        section = Font:getFace(FONT_REG, 22),
+        value = Font:getFace(FONT_BOLD, 32),
+        label = Font:getFace(FONT_REG, 20),
+        small = Font:getFace(FONT_REG, 18),
+        streakValue = Font:getFace(FONT_BOLD, 57),
+        streakLabel = Font:getFace(FONT_REG, 17),
+        streaRecordValue = Font:getFace(FONT_BOLD, 22),
+        streakStartEndWidget = Font:getFace(FONT_REG, 10),
+        author = Font:getFace(FONT_REG, 14),
+        titleLine1 = Font:getFace(FONT_REG, 25),
+        titleLine2 = Font:getFace(FONT_REG, 14),
     }
 end
 
@@ -1237,9 +1245,9 @@ local function buildInsightsSections(popup_self, streaks, yearly_stats, yearRang
 
     local maxCurrentStreak = math.max(streaks.days.current, streaks.weeks.current)
     if maxCurrentStreak > 1999 then
-        fonts.streakValue = Font:getFace("NotoSans-Bold.ttf", 50)
+        fonts.streakValue = Font:getFace(FONT_BOLD, 50)
     elseif maxCurrentStreak > 199 then
-        fonts.streakValue = Font:getFace("NotoSans-Bold.ttf", 55)
+        fonts.streakValue = Font:getFace(FONT_BOLD, 55)
     end
 
     local bestStreakWidget = buildBestStreakWidget(streaks, streaks_dimen, fonts, streaks_colors)
@@ -1770,18 +1778,30 @@ function BookListPopup:init()
         local summary_left = TextWidget:new{ text = total_pages_text, face = fonts.small, fgcolor = black }
         local summary_right = TextWidget:new{ text = total_duration_text, face = fonts.small, fgcolor = black }
 
-        local gap_width = list_content_width - summary_left:getSize().w - summary_right:getSize().w - 2 * Screen:scaleBySize(8)
-        if gap_width < 0 then gap_width = 0 end
-
-        local summary_content = HorizontalGroup:new{
-            align = "center",
-            summary_left,
-            HorizontalSpan:new{ width = gap_width },
-            summary_right,
-        }
+        local left_w = summary_left:getSize().w
+        local right_w = summary_right:getSize().w
+        local side_pad = 2 * Screen:scaleBySize(8)
+        local summary_content
+        if left_w + right_w + side_pad <= list_content_width then
+            summary_content = HorizontalGroup:new{
+                align = "center",
+                summary_left,
+                HorizontalSpan:new{ width = list_content_width - left_w - right_w - side_pad },
+                summary_right,
+            }
+        else
+            -- 并排放不下（UI 字体更宽 / 中文文案更长）就折成上下两行，别撑出卡片
+            summary_content = VerticalGroup:new{
+                align = "left",
+                summary_left,
+                VerticalSpan:new{ height = Screen:scaleBySize(2) },
+                summary_right,
+            }
+        end
+        local summary_h = math.max(summary_content:getSize().h, max_row_height)
 
         local summary_row = CenterContainer:new{
-            dimen = Geom:new{ w = list_content_width, h = max_row_height },
+            dimen = Geom:new{ w = list_content_width, h = summary_h },
             summary_content,
         }
         table.insert(list, summary_row)
@@ -1875,7 +1895,7 @@ function BookListPopup:init()
         return ic
     end
 
-    local page_label_font = Font:getFace("NotoSans-Regular.ttf", 15)
+    local page_label_font = Font:getFace(FONT_REG, 15)
     local page_label = TextWidget:new{
         text = tostring(self.current_page) .. " / " .. tostring(total_pages),
         face = page_label_font,

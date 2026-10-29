@@ -82,18 +82,6 @@ function ReadingStats:addToMainMenu(menu_items)
         end
     end
 
-    -- 子模块的设置菜单原本是"顶级项"（自带 sorting_hint="tools"）。
-    -- 现在被嵌进「设置」里，顶级分组提示已无意义且可能引起误解，清掉它；
-    -- 同时做浅拷贝，避免改动子模块自己的表。
-    local cal_settings = nil
-    if type(CalendarStats.settings_menu) == "table" then
-        cal_settings = {}
-        for k, v in pairs(CalendarStats.settings_menu) do cal_settings[k] = v end
-        cal_settings.sorting_hint = nil
-    else
-        logger.err("READINGSTATS: calendar_stats.settings_menu 缺失或类型异常")
-    end
-
     -- 阅读分析每页行数（7 / 8）设置项
     local rows_setting = {
         text_func = function()
@@ -162,7 +150,6 @@ function ReadingStats:addToMainMenu(menu_items)
                 -- 数组在 nil 处截断，后面的项整段消失。
                 sub_item_table = (function()
                     local items = {}
-                    if cal_settings then items[#items + 1] = cal_settings end
                     if HeatmapView.settings_menu then items[#items + 1] = HeatmapView.settings_menu end
                     items[#items + 1] = rows_setting
                     return items
