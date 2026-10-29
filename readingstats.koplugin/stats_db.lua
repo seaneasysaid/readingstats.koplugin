@@ -81,8 +81,14 @@ function M.exec(conn, sql, tag)
     if not conn or not sql then return nil end
     local ok, res = pcall(function() return conn:exec(sql) end)
     if not ok or type(res) ~= "table" then
-        local sql2 = sql:gsub("page_stat", "page_stat_data")
-        if sql2 ~= sql then
+        -- 只回退「确实写的旧表名」的语句：SQL 里本来就是 page_stat_data 时不能替换，
+        -- 否则 gsub 会把 page_stat_data 改成 page_stat_data_data（gsub 吃掉 page_stat 后
+        -- 从剩下的 _data 继续扫描，拼出 _data_data，不是直觉以为的 page_stat_datadata）。
+        local sql2
+        if not sql:find("page_stat_data", 1, true) then
+            sql2 = sql:gsub("page_stat", "page_stat_data")
+        end
+        if sql2 and sql2 ~= sql then
             ok, res = pcall(function() return conn:exec(sql2) end)
         end
     end
@@ -94,11 +100,14 @@ function M.exec(conn, sql, tag)
 end
 
 --- prepare 一条语句交给 fn(stmt) 使用，语句必定关闭；出错记 error 并返回 nil。
+--- ⚠️ 本模块的对外契约是「任何 API 都不抛异常」，所以 prepare 也要包 pcall：
+--- 语法错的 SQL、或连接已失效时 conn:prepare 会直接抛，不能指望调用方外面套了 pcall。
 function M.withStatement(conn, sql, fn, tag)
     if not conn then return nil end
-    local stmt = conn:prepare(sql)
-    if not stmt then
-        logger.err(prefix(tag) .. "SQL prepare 失败: " .. tostring(sql))
+    local ok, stmt = pcall(function() return conn:prepare(sql) end)
+    if not ok or not stmt then
+        logger.err(prefix(tag) .. "SQL prepare 失败: " .. tostring(stmt)
+            .. " | " .. tostring(sql))
         return nil
     end
     local ok, result = pcall(fn, stmt)
