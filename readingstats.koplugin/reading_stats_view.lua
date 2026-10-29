@@ -7,7 +7,6 @@
 local Blitbuffer          = require("ffi/blitbuffer")
 local BottomContainer     = require("ui/widget/container/bottomcontainer")
 local CenterContainer     = require("ui/widget/container/centercontainer")
-local DataStorage         = require("datastorage")
 local Device              = require("device")
 local FocusManager        = require("ui/widget/focusmanager")
 local Font                = require("ui/font")
@@ -22,15 +21,14 @@ local RightContainer      = require("ui/widget/container/rightcontainer")
 local ScrollableContainer = require("ui/widget/container/scrollablecontainer")
 local Screen              = Device.screen
 local Size                = require("ui/size")
-local SQ3                 = require("lua-ljsqlite3/init")
+local StatsDb             = require("stats_db")
 local TextBoxWidget       = require("ui/widget/textboxwidget")
 local TextWidget          = require("ui/widget/textwidget")
 local UIManager           = require("ui/uimanager")
 local VerticalGroup       = require("ui/widget/verticalgroup")
 local VerticalSpan        = require("ui/widget/verticalspan")
-local logger              = require("logger")
 
-local db_path = DataStorage:getSettingsDir() .. "/statistics.sqlite3"
+-- 统计库的路径与连接统一由 stats_db.lua 管理，本文件不再自己拼路径。
 
 local TABS = {
     { mode = "week",  text = "周" },
@@ -46,19 +44,11 @@ local MIN_MONTH_DAYS = 15 -- 月视图横轴最少保留的天数刻度
 -- ===================== 数据库访问 =====================
 -- 打开统计库连接（库不存在/打开失败返回 nil）。
 -- 配合「一次 init 只开一次库」，避免每次切 tab 都反复 open/close sqlite（e-ink 上很贵）。
+-- 具体实现在 stats_db.lua（四个视图共用），这里只固定日志前缀。
+local DB_TAG = "REPORT"
+
 local function openStatsDb()
-    local lfs = require("libs/libkoreader-lfs")
-    if lfs.attributes(db_path, "mode") ~= "file" then
-        logger.warn("READING_STATS_VIEW: statistics.sqlite3 不存在: " .. db_path)
-        return nil
-    end
-    -- 库损坏时 SQ3.open 会抛异常；兜住，否则整个视图初始化直接失败
-    local ok, conn = pcall(SQ3.open, db_path)
-    if not ok or not conn then
-        logger.err("READING_STATS_VIEW: 打开统计库失败: " .. db_path .. " " .. tostring(conn))
-        return nil
-    end
-    return conn
+    return StatsDb.open(DB_TAG)
 end
 
 -- 视图数据缓存：key = "mode:base_time"。短时间内重进同一周期直接命中，免去再查库。
@@ -74,16 +64,7 @@ end
 
 -- 执行一条查询；出错时记日志（不然各卡片会静默显示 0，设备上没法排查）。
 local function withStatement(conn, sql, fn)
-    local stmt = conn:prepare(sql)
-    if not stmt then
-        logger.err("READING_STATS_VIEW: SQL prepare 失败: " .. tostring(sql))
-        return
-    end
-    local ok, result = pcall(fn, stmt)
-    stmt:close()
-    if ok then return result end
-    logger.err("READING_STATS_VIEW: SQL 执行失败: " .. tostring(result)
-        .. " | " .. tostring(sql))
+    return StatsDb.withStatement(conn, sql, fn, DB_TAG)
 end
 
 -- ===================== 周期边界 =====================
@@ -347,12 +328,17 @@ local function fetchTopBooks(conn, b)
         LIMIT 10
     ]], function(stmt)
         for row in stmt:rows() do
-            local title = row[1] or ""
+            local title = tostring(row[1] or "")
             if title == "" or title == "N/A" then title = "未知书名" end
-            -- 作者可能为空、也可能被 KOReader 写成 "N/A"，两种都当作「没有作者」
-            local authors = row[2] or ""
-            authors = authors:gsub("^%s+", ""):gsub("%s+$", "")
-            if authors == "N/A" then authors = "" end
+            -- 作者可能为空、也可能被 KOReader 写成 "N/A"，两种都当作「没有作者」。
+            -- 这里只用 type 判定字符串：库被外部工具改过、列顺序不符时也不要让整张卡片崩掉。
+            local authors = row[2]
+            if authors == nil then
+                authors = ""
+            else
+                authors = tostring(authors):gsub("^%s+", ""):gsub("%s+$", "")
+                if authors == "N/A" then authors = "" end
+            end
             table.insert(books, {
                 title    = title,
                 authors  = authors,
@@ -911,7 +897,7 @@ function ReadingStatsView:init()
                 self.data.compare = (self.data.total - prev.duration) / prev.duration
             end
         end
-        if conn then conn:close() end
+        StatsDb.close(conn)
         cacheStore(cache_key, { ts = os.time(), data = self.data, bounds = self.bounds })
     end
 

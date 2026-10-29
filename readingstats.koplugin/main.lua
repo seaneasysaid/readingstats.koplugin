@@ -51,7 +51,7 @@ local function ensureInMenuOrder()
                 if k == "statistics" then pos = i + 1 break end
             end
             table.insert(tools, pos, MENU_KEY)
-            logger.warn("READINGSTATS[diag]: inserted '" .. MENU_KEY .. "' into order of " .. mod_name .. " at pos " .. pos)
+            logger.dbg("READINGSTATS: inserted '" .. MENU_KEY .. "' into order of " .. mod_name .. " at pos " .. pos)
         end)
     end
 end
@@ -64,9 +64,9 @@ local ReadingStats = WidgetContainer:extend{
 function ReadingStats:init()
     if self.ui and self.ui.menu then
         self.ui.menu:registerToMainMenu(self)
-        logger.warn("READINGSTATS[diag]: init() ok, registered to main menu")
+        logger.dbg("READINGSTATS: init() ok, registered to main menu")
     else
-        logger.warn("READINGSTATS[diag]: ui.menu NOT available at init time!")
+        logger.warn("READINGSTATS: ui.menu NOT available at init time!")
     end
 end
 
@@ -161,7 +161,7 @@ function ReadingStats:addToMainMenu(menu_items)
     -- 把键插进菜单 order，保证本机能渲染出来
     ensureInMenuOrder()
 
-    logger.warn("READINGSTATS[diag]: addToMainMenu() ok; sub_item_table=",
+    logger.dbg("READINGSTATS: addToMainMenu() ok; sub_item_table=",
         tostring(menu_items[MENU_KEY].sub_item_table ~= nil))
 end
 

@@ -6,7 +6,6 @@ local Button = require("ui/widget/button")
 local ButtonDialog = require("frontend/ui/widget/buttondialog")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local ConfirmBox = require("ui/widget/confirmbox")
-local DataStorage = require("datastorage")
 local Device = require("device")
 local Dispatcher = require("dispatcher")
 local FileManager = require("apps/filemanager/filemanager")
@@ -26,7 +25,7 @@ local logger = require("logger")
 local ReaderUI = require("apps/reader/readerui")
 local RightContainer = require("ui/widget/container/rightcontainer")
 local Size = require("ui/size")
-local SQ3 = require("lua-ljsqlite3/init")
+local StatsDb = require("stats_db")
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
@@ -285,7 +284,8 @@ local function normalizeMonthLabels(months)
     return months
 end
 
-local db_path = DataStorage:getSettingsDir() .. "/statistics.sqlite3"
+-- 统计库路径与连接统一由 stats_db.lua 管理（四个视图共用）
+local DB_TAG = "INSIGHTS"
 local ReadingInsightsPopup
 
 local INSIGHTS_MODE_KEY = "reading_insights_popup_mode"
@@ -344,9 +344,7 @@ local function set_cache_fullClear_timestamp(timestamp)
     uploadCacheTimestampsTogreader()
 end
 local function getDbModTime()
-    local lfs = require("libs/libkoreader-lfs")
-    local attr = lfs.attributes(db_path, "modification")
-    return attr or 0
+    return StatsDb.mtime()
 end
 
 local function clearCache(year)
@@ -377,14 +375,16 @@ local function clearCacheIfRequired()
 
     local latest_db_mod_timestamp = getDbModTime()
 
-    if refreshOnlyOncePerDay and (cache_timestamps.lastRefreshed > ts_midnight_today) then return end
-
+    -- 「书库统计刚同步过」必须无条件清缓存，优先级高于「每天只刷一次」：
+    -- 否则当天已经打开过阅读分析、随后又同步了新数据，会一直看到旧数字到第二天。
     if cache_timestamps.statsSynced > cache_timestamps.fullClear then
         set_cache_fullClear_timestamp(cache_timestamps.statsSynced)
         set_cache_partialClear_timestamp(latest_db_mod_timestamp)
         cache_timestamps.lastRefreshed = ts_now
         return clearCache()
     end
+
+    if refreshOnlyOncePerDay and (cache_timestamps.lastRefreshed > ts_midnight_today) then return end
 
     if latest_db_mod_timestamp > cache_timestamps.partialClear then
         for i = tonumber(os.date("%Y", cache_timestamps.partialClear)), tonumber(os.date("%Y", latest_db_mod_timestamp)) do
@@ -429,36 +429,14 @@ local fallbackTable = {
     isPlaceholder = true
 }
 
+-- 打开 → 跑 fn(conn) → 关闭；任一步失败都返回 fallback，不抛异常。
+-- 实现在 stats_db.lua（原先这里是唯一没兜住 SQ3.open 异常的一处）。
 local function withStatsDb(fallback, fn)
-    local lfs = require("libs/libkoreader-lfs")
-    if lfs.attributes(db_path, "mode") ~= "file" then
-        return fallback
-    end
-
-    local conn = SQ3.open(db_path)
-    if not conn then return fallback end
-
-    local ok, result = pcall(fn, conn)
-    conn:close()
-    if ok then
-        return result
-    end
-    return fallback
+    return StatsDb.withDb(fallback, fn, DB_TAG)
 end
 
 local function withStatement(conn, sql, fn)
-    local stmt = conn:prepare(sql)
-    if not stmt then
-        logger.err("READING-INSIGHTS-POPUP: SQL prepare 失败: " .. tostring(sql))
-        return
-    end
-    local ok, result = pcall(fn, stmt)
-    stmt:close()
-    if ok then
-        return result
-    end
-    logger.err("READING-INSIGHTS-POPUP: SQL 执行失败: " .. tostring(result)
-        .. " | " .. tostring(sql))
+    return StatsDb.withStatement(conn, sql, fn, DB_TAG)
 end
 
 local function computeStreaks(entries_desc, is_consecutive, is_current_start, weeksOrDays)
@@ -594,12 +572,14 @@ local function buildColumnSeparator(height)
     local v_padding = Size.padding.default
     return VerticalGroup:new{
         align = "center",
-        VerticalSpan:new{ height = v_padding },
+        -- 注意：VerticalSpan 的「高度」字段名叫 width（KOReader 历史包袱），
+        -- 写成 height 会被静默忽略、留白变 0。
+        VerticalSpan:new{ width = v_padding },
         LineWidget:new{
             dimen = Geom:new{ w = Size.line.medium, h = height - 2 * v_padding },
             background = Blitbuffer.COLOR_GRAY,
         },
-        VerticalSpan:new{ height = v_padding },
+        VerticalSpan:new{ width = v_padding },
     }
 end
 
@@ -785,7 +765,8 @@ local function buildYearHeader(popup_self, font_section, layout, yearRange)
 
     table.insert(popup_self.layout, 1, {tappable_year_label})
 
-    local function navButton(text, _, prevOrNext)
+    -- 第二个参数没用（保留位）。别写成 `_`：会遮蔽上文的 gettext，函数里再加 _("...") 就会炸。
+    local function navButton(text, _page, prevOrNext)
         local btn = Button:new{
             text = text,
             bordersize = 0,
@@ -1075,7 +1056,7 @@ local function buildMonthlyChart(popup_self, monthly_data, layout, fonts)
         return VerticalGroup:new{
             align = "center",
             bars_row,
-            VerticalSpan:new{ height = Size.padding.small },
+            VerticalSpan:new{ width = Size.padding.small },
             month_labels_row,
         }
     end
@@ -1098,7 +1079,7 @@ local function buildMonthlyChart(popup_self, monthly_data, layout, fonts)
         end
         if #row_data > 0 then
             if row_index > 0 then
-                table.insert(chart, VerticalSpan:new{ height = Size.padding.default })
+                table.insert(chart, VerticalSpan:new{ width = Size.padding.default })
             end
             local bar_row_group = createBarRow(row_data)
             local bars_row = bar_row_group[1]
@@ -1184,7 +1165,7 @@ local function buildBestStreakWidget(streaks, streaks_dimen, fonts, streaks_colo
         }
         if value > 1 and ts_start and ts_end then
             local startDay = os.date("%Y.%m.%d", ts_start)
-            local endDay = os.date("%y.%m.%d", ts_end)
+            local endDay = os.date("%Y.%m.%d", ts_end)
             local startEndWidget_txt = startDay .. "-" .. endDay
             local startEndWidget = TextBoxWidget:new{
                 width = streaks_dimen.box_width - Screen:scaleBySize(10),
@@ -1716,7 +1697,7 @@ function BookListPopup:init()
         local right_col = VerticalGroup:new{
             align = "right",
             pages_tw,
-            VerticalSpan:new{ height = Screen:scaleBySize(2) },
+            VerticalSpan:new{ width = Screen:scaleBySize(2) },
             duration_tw,
         }
 
@@ -1725,7 +1706,7 @@ function BookListPopup:init()
             title_col = VerticalGroup:new{
                 align = "left",
                 TextWidget:new{ text = book.title, face = fonts.small, max_width = title_w, fgcolor = black },
-                VerticalSpan:new{ height = Screen:scaleBySize(2) },
+                VerticalSpan:new{ width = Screen:scaleBySize(2) },
                 TextWidget:new{ text = "作者：" .. book.authors, face = fonts.author, max_width = title_w, fgcolor = black },
             }
         else
@@ -1794,7 +1775,7 @@ function BookListPopup:init()
             summary_content = VerticalGroup:new{
                 align = "left",
                 summary_left,
-                VerticalSpan:new{ height = Screen:scaleBySize(2) },
+                VerticalSpan:new{ width = Screen:scaleBySize(2) },
                 summary_right,
             }
         end
@@ -1991,8 +1972,13 @@ function BookListPopup:init()
     if not self.target_height then
         self.target_height = content_size.h
     end
-    if content_size.h < self.target_height then
-        table.insert(content, VerticalSpan:new{ height = self.target_height - content_size.h })
+    -- 补足到 target_height，让翻页时弹窗高度不跳。
+    -- ⚠️ 这里必须显式 resetLayout()：VerticalGroup:getSize() 只算一次并缓存 _offsets，
+    -- append 之后再取 size 仍是旧值，paintTo 走到新加的那一项时 _offsets[i] 为 nil 直接抛错。
+    local filler = self.target_height - content_size.h
+    if filler > 0 then
+        table.insert(content, VerticalSpan:new{ width = filler })
+        content:resetLayout()
     end
 
     self.popup_frame = FrameContainer:new{

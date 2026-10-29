@@ -1,8 +1,6 @@
 local Blitbuffer      = require("ffi/blitbuffer")
 local Button          = require("ui/widget/button")
 local CenterContainer = require("ui/widget/container/centercontainer")
-local DataStorage     = require("datastorage")
-local db_location     = DataStorage:getSettingsDir() .. "/statistics.sqlite3"
 local Device          = require("device")
 local Dispatcher      = require("dispatcher")
 local FileManager     = require("apps/filemanager/filemanager")
@@ -17,7 +15,7 @@ local LineWidget      = require("ui/widget/linewidget")
 local OverlapGroup    = require("ui/widget/overlapgroup")
 local ReaderUI        = require("apps/reader/readerui")
 local Screen          = Device.screen
-local SQ3             = require("lua-ljsqlite3/init")
+local StatsDb         = require("stats_db")
 local TextBoxWidget   = require("ui/widget/textboxwidget")
 local TextWidget      = require("ui/widget/textwidget")
 local UIManager       = require("ui/uimanager")
@@ -123,26 +121,16 @@ local function daysInMonth(y, m)
     return _dim_fallback[m] or 30
 end
 
+-- 库访问统一走 stats_db.lua。下面两个薄包装只负责把日志前缀钉成 CALENDAR，
+-- 函数名与调用点保持不变（本文件有 7 处调用），避免无谓的大范围改动。
+local DB_TAG = "CALENDAR"
+
 local function dbOpen()
-    -- 先确认文件存在：sqlite 打开一个不存在的路径会直接新建出空库文件
-    local lfs = require("libs/libkoreader-lfs")
-    if lfs.attributes(db_location, "mode") ~= "file" then return nil end
-    local ok, conn = pcall(SQ3.open, db_location)
-    if ok and conn then return conn end
-    return nil
+    return StatsDb.open(DB_TAG)
 end
 
 local function dbQuery(conn, sql)
-    if not conn or not sql then return nil end
-    local ok, res = pcall(function() return conn:exec(sql) end)
-    if not ok or type(res) ~= "table" then
-        local sql2 = sql:gsub("page_stat", "page_stat_data")
-        if sql2 ~= sql then
-            ok, res = pcall(function() return conn:exec(sql2) end)
-        end
-    end
-    if not ok or type(res) ~= "table" then return nil end
-    return res
+    return StatsDb.exec(conn, sql, DB_TAG)
 end
 
 -- ============================================================
@@ -206,34 +194,6 @@ local function queryStats(conn, where_clause)
     local res = dbQuery(conn, sql)
     if not res or type(res[1]) ~= "table" or #res[1] == 0 then return 0 end
     return tonumber(res[1][1]) or 0
-end
-
-local function queryStreak(conn)
-    if not conn then return 0 end
-
-    -- 限制范围：只查最近 10 年，避免全表 DISTINCT
-    local cutoff = midnight(os.time()) - 3650 * SECS_DAY
-    local sql = string.format([[
-        SELECT DISTINCT strftime('%%Y-%%m-%%d', start_time, 'unixepoch', 'localtime') AS ds
-        FROM page_stat
-        WHERE start_time >= %d
-        ORDER BY ds DESC;
-    ]], cutoff)
-
-    local res = dbQuery(conn, sql)
-    if not res or type(res[1]) ~= "table" or #res[1] == 0 then return 0 end
-
-    local days = {}
-    for i = 1, #res[1] do days[tostring(res[1][i])] = true end
-
-    local cursor = midnight(os.time())
-    if not days[os.date("%Y-%m-%d", cursor)] then cursor = cursor - SECS_DAY end
-    local streak = 0
-    while days[os.date("%Y-%m-%d", cursor)] do
-        streak = streak + 1
-        cursor = cursor - SECS_DAY
-    end
-    return streak
 end
 
 local function queryMonthlyDailyStats(conn, y, m)
@@ -304,7 +264,6 @@ local function fetchAllStats()
         s.week_secs  = 0
         s.month_secs = 0
         s.total_secs = 0
-        s.streak     = 0
         s.month_daily = {}
         return s
     end
@@ -313,7 +272,6 @@ local function fetchAllStats()
     s.week_secs  = queryStats(conn, whereThisWeek())
     s.month_secs = queryStats(conn, whereMonth(now.year, now.month))
     s.total_secs = queryStats(conn, whereAll())
-    s.streak     = queryStreak(conn)
     s.month_daily = queryMonthlyDailyStats(conn, now.year, now.month)
 
     pcall(function() conn:close() end)
@@ -336,7 +294,10 @@ local function getStatsCached()
 end
 
 -- 非当前月份的缓存（跨窗口实例保留）
+-- 带 TTL：翻月可以一直往后翻到未来月份，若把「未来月份=空」永久缓存下来，
+-- 等真到了那个月就会一直显示为空，直到重启 KOReader。
 local _month_cache = {}
+local MONTH_CACHE_TTL = 60   -- 秒
 
 local function fmtTime(secs)
     secs = math.floor(secs or 0)
@@ -409,15 +370,12 @@ end
 
 -- 每项只保留 label / get：原先的 sub / sub_fn 没有任何界面读取，属历史遗留
 -- 页数（today_pages / week_pages / month_pages / total_pages）已下线，不再提供
+-- 「连续天数」也已下线：STAT_ITEMS 里没有它，界面从不渲染，连同 queryStreak 一起删掉
 local STAT_DEFS = {
     today_time  = { label = _("今日时长"), get = function(s) return fmtTime(s.today_secs) end },
     week_time   = { label = _("本周时长"), get = function(s) return fmtTime(s.week_secs) end },
     month_time  = { label = _("本月时长"), get = function(s) return fmtTime(s.month_secs) end },
     total_time  = { label = _("累计时长"), get = function(s) return fmtTime(s.total_secs) end },
-    streak      = {
-        label = _("连续天数"),
-        get   = function(s) return s.streak > 0 and tostring(s.streak) or "—" end,
-    },
 }
 
 local CAL_BUDGET_ROWS = 6
@@ -585,7 +543,7 @@ function CalendarStatsWindow:_build()
         monthly_daily       = stats.month_daily or {}
     else
         local cached = _month_cache[mkey]
-        if cached then
+        if cached and (os.time() - (cached.ts or 0)) < MONTH_CACHE_TTL then
             calendar_month_secs = cached.secs
             monthly_daily       = cached.daily
         else
@@ -601,6 +559,7 @@ function CalendarStatsWindow:_build()
             _month_cache[mkey] = {
                 secs  = calendar_month_secs,
                 daily = monthly_daily,
+                ts    = os.time(),
             }
         end
     end

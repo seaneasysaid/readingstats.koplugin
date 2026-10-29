@@ -12,8 +12,6 @@
 
 local Blitbuffer      = require("ffi/blitbuffer")
 local CenterContainer = require("ui/widget/container/centercontainer")
-local DataStorage     = require("datastorage")
-local db_location     = DataStorage:getSettingsDir() .. "/statistics.sqlite3"
 local Device          = require("device")
 local Font            = require("ui/font")
 local FrameContainer  = require("ui/widget/container/framecontainer")
@@ -23,8 +21,8 @@ local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan  = require("ui/widget/horizontalspan")
 local InputContainer  = require("ui/widget/container/inputcontainer")
 local LeftContainer   = require("ui/widget/container/leftcontainer")
-local SQ3             = require("lua-ljsqlite3/init")
 local Screen          = Device.screen
+local StatsDb         = require("stats_db")
 local TextWidget      = require("ui/widget/textwidget")
 local UIManager       = require("ui/uimanager")
 local VerticalGroup   = require("ui/widget/verticalgroup")
@@ -145,26 +143,15 @@ end
 -- 数据库：按天聚合阅读秒数
 -- ============================================================
 
+-- 库访问统一走 stats_db.lua（薄包装只为固定日志前缀，调用点保持原名）。
+local DB_TAG = "HEATMAP"
+
 local function dbOpen()
-    -- 先确认文件存在：sqlite 打开一个不存在的路径会直接新建出空库文件
-    local lfs = require("libs/libkoreader-lfs")
-    if lfs.attributes(db_location, "mode") ~= "file" then return nil end
-    local ok, conn = pcall(SQ3.open, db_location)
-    if ok and conn then return conn end
-    return nil
+    return StatsDb.open(DB_TAG)
 end
 
 local function dbQuery(conn, sql)
-    if not conn or not sql then return nil end
-    local ok, res = pcall(function() return conn:exec(sql) end)
-    if not ok or type(res) ~= "table" then
-        local sql2 = sql:gsub("page_stat", "page_stat_data")
-        if sql2 ~= sql then
-            ok, res = pcall(function() return conn:exec(sql2) end)
-        end
-    end
-    if not ok or type(res) ~= "table" then return nil end
-    return res
+    return StatsDb.exec(conn, sql, DB_TAG)
 end
 
 -- 返回 { ["2026-09-19"] = seconds }
@@ -598,13 +585,6 @@ function HeatmapWindow:_build()
     -- 会把 CenterContainer 裁成 0 高 → 整块网格不可见）
     local block_h = MONTH_H + BLOCK_MONTH_GAP + cell * 7 + GAP * 6
     local grid_h  = row_blocks * block_h + (row_blocks - 1) * SECTION_GAP
-    local gs = grid_blocks:getSize()
-    logger.warn(string.format(
-        "HEATMAP[diag]: weeks=%d blocks=%d cols=%d offset=%d range=%s~%s active_days=%d "
-        .. "cell=%d wd=%s grid_w=%d grid_h=%d getSize_h=%s border=%s fill1=%s",
-        weeks, row_blocks, cols, offset, fmtDate(start_ts), fmtDate(end_ts - SECS_DAY),
-        active_days, cell, tostring(show_weekday), grid_w, grid_h,
-        tostring(gs and gs.h), tostring(HM_BORDER), tostring(HM_FILL[1])))
 
     local grid_cc = CenterContainer:new {
         dimen = Geom:new { w = inner_w, h = grid_h },
