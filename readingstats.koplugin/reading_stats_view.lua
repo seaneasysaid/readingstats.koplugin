@@ -336,6 +336,7 @@ local function fetchTopBooks(conn, b)
         "page_stat.start_time >= %d AND page_stat.start_time < %d", b.start_ts, b.end_ts)
     withStatement(conn, [[
         SELECT book.title,
+               book.authors,
                COALESCE(SUM(page_stat.duration),0) AS duration_seconds
         FROM page_stat
         JOIN book ON page_stat.id_book = book.id
@@ -348,9 +349,14 @@ local function fetchTopBooks(conn, b)
         for row in stmt:rows() do
             local title = row[1] or ""
             if title == "" or title == "N/A" then title = "未知书名" end
+            -- 作者可能为空、也可能被 KOReader 写成 "N/A"，两种都当作「没有作者」
+            local authors = row[2] or ""
+            authors = authors:gsub("^%s+", ""):gsub("%s+$", "")
+            if authors == "N/A" then authors = "" end
             table.insert(books, {
                 title    = title,
-                duration = tonumber(row[2]) or 0,
+                authors  = authors,
+                duration = tonumber(row[3]) or 0,
             })
         end
     end)
@@ -439,19 +445,43 @@ function ReadingStatsView:cardTitle(text)
 end
 
 -- 左标签 + 右数值，铺满内容宽度
-function ReadingStatsView:kvLine(left, right, face, right_color)
+-- sub：可选的次要信息（如作者），跟在左标签后面，与书名同字号同黑色（和日历阅读统计的
+-- 「书名 · 作者」保持一致，别做灰做小，墨水屏上会糊）；
+-- 单独成一个控件、先占宽度，这样书名再长也只会截书名，不会把作者挤没。
+function ReadingStatsView:kvLine(left, right, face, right_color, sub)
     face = face or self.fonts.body
     local right_tw = TextWidget:new{ text = right, face = face,
         fgcolor = right_color or Blitbuffer.COLOR_BLACK }
     local rw = right_tw:getSize().w
-    local left_tw = TextWidget:new{
-        text = left, face = face,
-        max_width = math.max(1, self.content_width - rw - Size.padding.default),
-    }
-    local gap = math.max(Size.padding.small, self.content_width - rw - left_tw:getSize().w)
+    local avail = math.max(1, self.content_width - rw - Size.padding.default)
+
+    local left_col
+    if sub and sub ~= "" then
+        local sub_tw = TextWidget:new{
+            text = "· " .. sub, face = face,
+            fgcolor = Blitbuffer.COLOR_BLACK,
+            max_width = math.max(1, math.floor(avail * 0.4)),
+        }
+        local sub_w = sub_tw:getSize().w
+        local sub_gap = Size.padding.small
+        left_col = HorizontalGroup:new{
+            align = "center",
+            TextWidget:new{
+                text = left, face = face,
+                max_width = math.max(1, avail - sub_w - sub_gap),
+            },
+            HorizontalSpan:new{ width = sub_gap },
+            sub_tw,
+        }
+    else
+        left_col = TextWidget:new{ text = left, face = face, max_width = avail }
+    end
+
+    local gap = math.max(Size.padding.small,
+        self.content_width - rw - left_col:getSize().w)
     return HorizontalGroup:new{
         align = "center",
-        left_tw,
+        left_col,
         HorizontalSpan:new{ width = gap },
         right_tw,
     }
@@ -459,7 +489,7 @@ end
 
 -- 比例条：「名称 …… 数值」+ 一根与占比成正比的实心条
 -- 底下垫一层浅灰轨道，这样占比为 0 / 极小时也不会只留下一条莫名其妙的短线
-function ReadingStatsView:proportionBar(name, value_text, ratio)
+function ReadingStatsView:proportionBar(name, value_text, ratio, sub)
     ratio = math.max(0, math.min(1, tonumber(ratio) or 0))
     local layers = {
         LineWidget:new{
@@ -477,7 +507,7 @@ function ReadingStatsView:proportionBar(name, value_text, ratio)
     return VerticalGroup:new{
         align = "left",
         self:widthPin(),
-        self:kvLine(name, value_text, self.fonts.body),
+        self:kvLine(name, value_text, self.fonts.body, nil, sub),
         VerticalSpan:new{ width = Size.padding.tiny },
         OverlapGroup:new(layers),
     }
@@ -627,7 +657,8 @@ function ReadingStatsView:buildRankCard()
         table.insert(content, self:proportionBar(
             string.format("%d. %s", i, it.title),
             fmtDuration(it.duration),
-            it.duration / maxs))
+            it.duration / maxs,
+            it.authors))
     end
     return self:makeCard(content)
 end
