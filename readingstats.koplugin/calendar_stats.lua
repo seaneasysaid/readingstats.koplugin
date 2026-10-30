@@ -1245,7 +1245,6 @@ function CalendarStatsWindow:_build()
         local TITLE_H = Screen:scaleBySize(30)
         local HEAD_GAP = Screen:scaleBySize(4)
         local head_h  = TITLE_H + HEAD_GAP
-        local list_avail = math.max(1, panel_h - head_h)
 
         local panel = VerticalGroup:new { align = "left" }
 
@@ -1284,23 +1283,19 @@ function CalendarStatsWindow:_build()
             -- 长度条取自「统计概览 · 读书排行」的 proportionBar：
             -- 浅灰轨道铺满整行宽，黑色实心条按「本书时长 / 当天最长」的比例截取。
             --
-            -- 行距按「一屏至少排 4 本」来定：先试与统计项同号的 18，
-            -- 该屏放不下 4 本才逐级下调字号（最低 11），保证小屏也能排满 4 行。
-            local MIN_ROWS    = 4
+            -- ⚠️ 字号固定 18，不再按「至少排 4 本」逐级下调字号：
+            --   6 行格子的月份卡片一更高，一屏自然少排一行，多出的书用滚动条看。
+            --   宁可少一行，也不把书名压小 —— 墨水屏上小字等于看不清。
             local BAR_THIN    = math.max(2, Screen:scaleBySize(3))
             local BAR_GAP     = Screen:scaleBySize(2)   -- 文字行与长度条之间
             local ROW_GAP     = Screen:scaleBySize(3)   -- 长度条与下一行之间
             local ROW_PAD_T   = 1
 
-            local face_d_row, text_line_h, row_h
-            for sz = 18, 11, -1 do
-                face_d_row  = Font:getFace(FONT_REG, sz)
-                text_line_h = math.max(
-                    (select(2, measureText("Ag", face_d_row)) or 0),
-                    (select(2, measureText("Ag", face_d_sub)) or 0))
-                row_h = ROW_PAD_T + text_line_h + BAR_GAP + BAR_THIN + ROW_GAP
-                if math.floor(list_avail / row_h) >= MIN_ROWS then break end
-            end
+            local face_d_row  = Font:getFace(FONT_REG, 18)
+            local text_line_h = math.max(
+                (select(2, measureText("Ag", face_d_row)) or 0),
+                (select(2, measureText("Ag", face_d_sub)) or 0))
+            local row_h = ROW_PAD_T + text_line_h + BAR_GAP + BAR_THIN + ROW_GAP
 
             -- 满格基准取当天最长的一本书（不是可见那几行，滚动时比例才稳定）
             local max_dur = 1
@@ -1486,6 +1481,8 @@ function CalendarStatsWindow:_build()
     local card1_h = (card1:getSize() and card1:getSize().h) or 0
 
     -- ===== 卡片二：当天阅读详情（吃满剩余高度）=====
+    -- 高度跟着日历实际占位走：6 行格子的月份必然矮一点、少显示一行书，
+    -- 但字号恒定 18，行数不强行对齐。
     local card2_y = header_h + TITLE_GAP + card1_h + CARD_GAP
     local card2_inner_h = SCR_H - FRAME_PAD - card2_y - CARD_CHROME_V
     if card2_inner_h < DETAIL_MIN_H then card2_inner_h = DETAIL_MIN_H end
