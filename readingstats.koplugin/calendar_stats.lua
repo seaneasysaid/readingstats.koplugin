@@ -320,31 +320,19 @@ local function fmtCN(secs)
     return string.format(_("%d分钟"), m)
 end
 
--- 日格里的时长：中文优先。同一个时长给出「从完整到紧凑」的几种写法，
--- 由调用方按格子实际宽度挑一个放得下的（格子窄时自动退到 2时30分 / 2h30m）
+-- 日格里的时长：统一用 h / m 缩写。「x小时y分钟」太长，窄格子里会把字号一路压到 9。
+-- 只给一种写法，由 fitCellTime 按格子宽度挑字号；实在放不下仍由它退到最小字号。
 local function cellTimeCandidates(secs)
     secs = math.floor(tonumber(secs) or 0)
     if secs <= 0 then return { "" } end
-    if secs < 60 then return { _("<1分钟"), _("<1分") } end
+    if secs < 60 then return { "<1m" } end
     local h = math.floor(secs / 3600)
     local m = math.floor((secs % 3600) / 60)
     if h >= 1 then
-        if m == 0 then
-            return { string.format(_("%d小时"), h), string.format(_("%d时"), h),
-                     string.format("%dh", h) }
-        end
-        return {
-            string.format(_("%d小时%d分钟"), h, m),
-            string.format(_("%d小时%d分"), h, m),
-            string.format(_("%d时%d分"), h, m),
-            string.format("%dh%dm", h, m),
-        }
+        if m == 0 then return { string.format("%dh", h) } end
+        return { string.format("%dh%dm", h, m) }
     end
-    return {
-        string.format(_("%d分钟"), m),
-        string.format(_("%d分"), m),
-        string.format("%dm", m),
-    }
+    return { string.format("%dm", m) }
 end
 
 local function secsToTotalMinutes(secs)
@@ -353,18 +341,26 @@ local function secsToTotalMinutes(secs)
     return math.floor(secs / 60)
 end
 
+-- 四档颜色刻度（单位：分钟，向下取整后比较）。图例文案按「上限」表述：
+--   1 小时内浅 / 2 小时内中 / 3 小时内深 / 3 小时以上最深。
+-- 最后一档没有上限，图例写「4 小时」表示该量级（与旧版「更深2小时」同理）。
+local CELL_LEVEL_1 = 60
+local CELL_LEVEL_2 = 120
+local CELL_LEVEL_3 = 180
+
 local function cellFill(secs)
     local m = secsToTotalMinutes(secs)
-    if m <= 0  then return WHITE       end
-    if m <= 30 then return LIGHT_FILL  end
-    if m <= 60 then return MEDIUM_FILL end
-    if m <= 90 then return DARK_FILL   end
+    if m <= 0             then return WHITE       end
+    if m <= CELL_LEVEL_1  then return LIGHT_FILL  end
+    if m <= CELL_LEVEL_2  then return MEDIUM_FILL end
+    if m <= CELL_LEVEL_3  then return DARK_FILL   end
     return DEEP_FILL
 end
 
 local function cellTextColor(secs)
     local m = secsToTotalMinutes(secs)
-    if m > 60 then return WHITE end
+    -- 中灰与深灰的分界之后底色变深，日期/时长文字改白字才看得清
+    if m > CELL_LEVEL_2 then return WHITE end
     return BLACK
 end
 
@@ -1119,10 +1115,10 @@ function CalendarStatsWindow:_build()
         end
 
         local legend_items = {
-            { LIGHT_FILL,  _("浅30分钟")     },
-            { MEDIUM_FILL, _("中1小时")      },
-            { DARK_FILL,   _("深1小时30分钟") },
-            { DEEP_FILL,   _("更深2小时")    },
+            { LIGHT_FILL,  _("浅1小时")   },
+            { MEDIUM_FILL, _("中2小时")   },
+            { DARK_FILL,   _("深3小时")   },
+            { DEEP_FILL,   _("更深4小时") },
         }
 
         local total_str = string.format(_("本月阅读 %d天"), view_month_days)
